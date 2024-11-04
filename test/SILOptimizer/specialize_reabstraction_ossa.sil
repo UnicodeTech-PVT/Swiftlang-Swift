@@ -1,0 +1,266 @@
+// RUN: %target-sil-opt -enable-sil-verify-all -generic-specializer %s | %FileCheck %s
+
+sil_stage canonical
+
+import Builtin
+import Swift
+
+public protocol RefProto {
+  associatedtype T
+  var me: Ref<Self.T> { get }
+}
+
+public final class Ref<T> : RefProto {
+  public final var me: Ref<T> { get }
+  deinit
+  init()
+}
+
+extension RefProto {
+  public func merge<U>(other: Ref<U>) -> Ref<(Self.T, U)>
+}
+
+public protocol ValProto {
+  associatedtype T
+  var me: Val<Self.T> { get }
+}
+
+extension ValProto {
+  public func merge<U>(other: Val<U>) -> Val<(Self.T, U)>
+}
+
+public struct Val<T> : ValProto {
+  public var me: Val<T> { get }
+  init()
+}
+
+struct Err : Error {
+  init()
+}
+
+protocol P {}
+
+struct NonLoadableErr : Error {
+  @_hasStorage var p: P
+  init()
+}
+
+
+sil @coerce : $@convention(thin) <T, U, V> (@owned @callee_owned (@owned Ref<T>) -> @owned @callee_owned (@owned Ref<U>) -> @owned Ref<V>) -> @owned @callee_owned (Val<U>) -> Val<V>
+
+sil [ossa] @merge : $@convention(method) <Self where Self : RefProto><U> (@owned Ref<U>, @in_guaranteed Self) -> @owned Ref<(Self.T, U)> {
+bb0(%0 : @owned $Ref<U>, %1 : $*Self):
+  %2 = alloc_ref $Ref<(Self.T, U)>
+  destroy_value %0 : $Ref<U>
+  return %2 : $Ref<(Self.T, U)>
+}
+
+sil [ossa] @merge_curried : $@convention(thin) <Self where Self : RefProto><U> (@in Self) -> @owned @callee_owned (@owned Ref<U>) -> @owned Ref<(Self.T, U)> {
+bb0(%0 : $*Self):
+  %1 = function_ref @merge : $@convention(method) <τ_0_0 where τ_0_0 : RefProto><τ_1_0> (@owned Ref<τ_1_0>, @in_guaranteed τ_0_0) -> @owned Ref<(τ_0_0.T, τ_1_0)>
+  %2 = partial_apply %1<Self, U>(%0) : $@convention(method) <τ_0_0 where τ_0_0 : RefProto><τ_1_0> (@owned Ref<τ_1_0>, @in_guaranteed τ_0_0) -> @owned Ref<(τ_0_0.T, τ_1_0)>
+  return %2 : $@callee_owned (@owned Ref<U>) -> @owned Ref<(Self.T, U)>
+}
+
+sil [ossa] [reabstraction_thunk] @reabstract : $@convention(thin) <Self where Self : ValProto><U> (@owned Ref<Self.T>, @owned @callee_owned (@in Ref<Self.T>) -> @owned @callee_owned (@owned Ref<U>) -> @owned Ref<(Self.T, U)>) -> @owned @callee_owned (@owned Ref<U>) -> @owned Ref<(Self.T, U)> {
+bb0(%0 : @owned $Ref<Self.T>, %1 : @owned $@callee_owned (@in Ref<Self.T>) -> @owned @callee_owned (@owned Ref<U>) -> @owned Ref<(Self.T, U)>):
+  %2 = alloc_stack $Ref<Self.T>
+  store %0 to [init] %2 : $*Ref<Self.T>
+  %4 = apply %1(%2) : $@callee_owned (@in Ref<Self.T>) -> @owned @callee_owned (@owned Ref<U>) -> @owned Ref<(Self.T, U)>
+  dealloc_stack %2 : $*Ref<Self.T>
+  return %4 : $@callee_owned (@owned Ref<U>) -> @owned Ref<(Self.T, U)>
+}
+
+// CHECK-LABEL: sil [ossa] @test
+sil [ossa] @test : $@convention(thin) (Val<Bool>, Val<Int>) -> Val<(Bool, Int)> {
+// CHECK: bb0
+bb0(%0 : $Val<Bool>, %1 : $Val<Int>):
+  // CHECK: [[COERCE:%.*]] = function_ref @coerce
+  %2 = function_ref @coerce : $@convention(thin) <τ_0_0, τ_0_1, τ_0_2> (@owned @callee_owned (@owned Ref<τ_0_0>) -> @owned @callee_owned (@owned Ref<τ_0_1>) -> @owned Ref<τ_0_2>) -> @owned @callee_owned (Val<τ_0_1>) -> Val<τ_0_2>
+  // CHECK: [[MERGE:%.*]] = function_ref @$s13merge_curried4main3RefCySbG_SiTg5
+  %3 = function_ref @merge_curried : $@convention(thin) <τ_0_0 where τ_0_0 : RefProto><τ_1_0> (@in τ_0_0) -> @owned @callee_owned (@owned Ref<τ_1_0>) -> @owned Ref<(τ_0_0.T, τ_1_0)>
+  // CHECK: [[PARTIAL:%.*]] = partial_apply [[MERGE]]()
+  %4 = partial_apply %3<Ref<Bool>, Int>() : $@convention(thin) <τ_0_0 where τ_0_0 : RefProto><τ_1_0> (@in τ_0_0) -> @owned @callee_owned (@owned Ref<τ_1_0>) -> @owned Ref<(τ_0_0.T, τ_1_0)>
+  // CHECK-NOT: function_ref @reabstract
+  %5 = function_ref @reabstract : $@convention(thin) <τ_0_0 where τ_0_0 : ValProto><τ_1_0> (@owned Ref<τ_0_0.T>, @owned @callee_owned (@in Ref<τ_0_0.T>) -> @owned @callee_owned (@owned Ref<τ_1_0>) -> @owned Ref<(τ_0_0.T, τ_1_0)>) -> @owned @callee_owned (@owned Ref<τ_1_0>) -> @owned Ref<(τ_0_0.T, τ_1_0)>
+  // CHECK-NOT: partial_apply
+  %6 = partial_apply %5<Val<Bool>, Int>(%4) : $@convention(thin) <τ_0_0 where τ_0_0 : ValProto><τ_1_0> (@owned Ref<τ_0_0.T>, @owned @callee_owned (@in Ref<τ_0_0.T>) -> @owned @callee_owned (@owned Ref<τ_1_0>) -> @owned Ref<(τ_0_0.T, τ_1_0)>) -> @owned @callee_owned (@owned Ref<τ_1_0>) -> @owned Ref<(τ_0_0.T, τ_1_0)>
+  // CHECK: apply [[COERCE]]<Bool, Int, (Bool, Int)>([[PARTIAL]])
+  %7 = apply %2<Bool, Int, (Bool, Int)>(%6) : $@convention(thin) <τ_0_0, τ_0_1, τ_0_2> (@owned @callee_owned (@owned Ref<τ_0_0>) -> @owned @callee_owned (@owned Ref<τ_0_1>) -> @owned Ref<τ_0_2>) -> @owned @callee_owned (Val<τ_0_1>) -> Val<τ_0_2>
+  %8 = apply %7(%1) : $@callee_owned (Val<Int>) -> Val<(Bool, Int)>
+  return %8 : $Val<(Bool, Int)>
+}
+
+// CHECK-LABEL: sil shared [ossa] @$s9coroutineSb_Tg5 : $@yield_once @convention(thin) (Bool) -> @yields @inout Bool {
+// CHECK:       bb0(%0 : $Bool):
+// CHECK-NEXT:    [[TEMP:%.*]] = alloc_stack $Bool
+// CHECK-NEXT:    store %0 to [trivial] [[TEMP]] : $*Bool
+// CHECK-NEXT:    yield [[TEMP]] : $*Bool, resume bb1, unwind bb2
+// CHECK:       bb1:
+// CHECK-NEXT:    destroy_addr [[TEMP]] : $*Bool
+// CHECK-NEXT:    [[RV:%.*]] = tuple ()
+// CHECK-NEXT:    dealloc_stack [[TEMP]] : $*Bool
+// CHECK-NEXT:    return [[RV]] : $()
+// CHECK:       bb2:
+// CHECK-NEXT:    destroy_addr [[TEMP]] : $*Bool
+// CHECK-NEXT:    dealloc_stack [[TEMP]] : $*Bool
+// CHECK-NEXT:    unwind
+// CHECK-NEXT:  }
+sil [ossa] @coroutine : $@yield_once @convention(thin) <T> (@in T) -> @yields @inout T {
+bb0(%0 : $*T):
+  yield %0 : $*T, resume bb1, unwind bb2
+bb1:
+  destroy_addr %0 : $*T
+  %rv = tuple ()
+  return %rv : $()
+bb2:
+  destroy_addr %0 : $*T
+  unwind
+}
+
+// CHECK-LABEL: @test_coroutine : $@convention(thin) (Bool) -> () {
+// CHECK:       bb0(%0 : $Bool):
+// CHECK-NEXT:    [[TEMP:%.*]] = alloc_stack $Bool
+// CHECK-NEXT:    store %0 to [trivial] [[TEMP]] : $*Bool
+// CHECK-NEXT:    // function_ref
+// CHECK-NEXT:    [[CORO:%.*]] = function_ref @$s9coroutineSb_Tg5 : $@yield_once @convention(thin) (Bool) -> @yields @inout Bool
+// CHECK-NEXT:    [[LOAD:%.*]] = load [trivial] [[TEMP]] : $*Bool
+// CHECK-NEXT:    ([[ADDR:%.*]], [[TOKEN:%.*]]) = begin_apply [[CORO]]([[LOAD]])
+// CHECK-NEXT:    end_apply [[TOKEN]] as $()
+// CHECK-NEXT:    dealloc_stack [[TEMP]] : $*Bool
+// CHECK-NEXT:    [[RV:%.*]] = tuple ()
+// CHECK-NEXT:    return [[RV]] : $()
+// CHECK-NEXT:  }
+sil [ossa] @test_coroutine : $@convention(thin) (Bool) -> () {
+bb0(%0 : $Bool):
+  %coro = function_ref @coroutine : $@yield_once @convention(thin) <T> (@in T) -> @yields @inout T
+  %temp = alloc_stack $Bool
+  store %0 to [trivial] %temp : $*Bool
+  (%addr, %token) = begin_apply %coro<Bool>(%temp) : $@yield_once @convention(thin) <T> (@in T) -> @yields @inout T
+  end_apply %token as $()
+  dealloc_stack %temp : $*Bool
+  %rv = tuple ()
+  return %rv : $()
+}
+
+// CHECK-LABEL: sil [ossa] @test_indirect_error :
+// CHECK:         [[F:%.*]] = function_ref @$s14indirect_error4main3ErrV_Tg5 : $@convention(thin) (Err) -> (Int, @error Err)
+// CHECK:         try_apply [[F]]({{%[0-9]+}}) : $@convention(thin) (Err) -> (Int, @error Err), normal bb1, error bb2
+// CHECK:       bb1(%8 : $Int):
+// CHECK:       bb2({{%[0-9]+}} : $Err):
+// CHECK:       } // end sil function 'test_indirect_error'
+sil [ossa] @test_indirect_error : $@convention(thin) (Err) -> @error Err {
+bb0(%0 : $Err):
+  %3 = alloc_stack $Err
+  store %0 to [trivial] %3 : $*Err
+  %5 = function_ref @indirect_error : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  %6 = alloc_stack $Err
+  %7 = alloc_stack $Int
+  try_apply %5<Err>(%7, %6, %3) : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0), normal bb1, error bb2
+
+bb1(%8 : $()):
+  dealloc_stack %7 : $*Int
+  dealloc_stack %6 : $*Err
+  dealloc_stack %3 : $*Err
+  %11 = tuple ()
+  return %11 : $()
+
+bb2:
+  %13 = load [trivial] %6 : $*Err
+  dealloc_stack %7 : $*Int
+  dealloc_stack %6 : $*Err
+  dealloc_stack %3 : $*Err
+  throw %13 : $Err
+}
+
+// CHECK-LABEL: sil shared [ossa] @$s14indirect_error4main3ErrV_Tg5 : $@convention(thin) (Err) -> (Int, @error Err) {
+// CHECK:         throw {{%[0-9]+}} : $Err
+// CHECK:       } // end sil function '$s14indirect_error4main3ErrV_Tg5'
+
+// CHECK-LABEL: sil shared [ossa] @$s14indirect_error4main14NonLoadableErrV_Tg5 : $@convention(thin) (@in_guaranteed NonLoadableErr) -> (Int, @error_indirect NonLoadableErr) {
+// CHECK:         throw_addr
+// CHECK:       } // end sil function '$s14indirect_error4main14NonLoadableErrV_Tg5'
+
+sil [ossa] @indirect_error : $@convention(thin) <E where E : Error> (@in_guaranteed E) -> (@out Int, @error_indirect E) {
+bb0(%0 : $*Int, %1 : $*E, %2 : $*E):
+  copy_addr %2 to [init] %1 : $*E
+  throw_addr
+}
+
+// CHECK-LABEL: sil [ossa] @test_indirect_error_nothrow :
+// CHECK:         [[F:%.*]] = function_ref @$s14indirect_error4main3ErrV_Tg5 : $@convention(thin) (Err) -> (Int, @error Err)
+// CHECK:         apply [nothrow] [[F]]({{%[0-9]+}}) : $@convention(thin) (Err) -> (Int, @error Err)
+// CHECK:       } // end sil function 'test_indirect_error_nothrow'
+sil [ossa] @test_indirect_error_nothrow : $@convention(thin) (Err) -> @error Err {
+bb0(%0 : $Err):
+  %3 = alloc_stack $Err
+  store %0 to [trivial] %3 : $*Err
+  %5 = function_ref @indirect_error : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  %6 = alloc_stack $Err
+  %7 = alloc_stack $Int
+  apply [nothrow] %5<Err>(%7, %6, %3) : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  dealloc_stack %7 : $*Int
+  dealloc_stack %6 : $*Err
+  dealloc_stack %3 : $*Err
+  %11 = tuple ()
+  return %11 : $()
+}
+
+// CHECK-LABEL: sil [ossa] @test_indirect_non_loadable_error_nothrow :
+// CHECK:         [[F:%.*]] = function_ref @$s14indirect_error4main14NonLoadableErrV_Tg5 : $@convention(thin) (@in_guaranteed NonLoadableErr) -> (Int, @error_indirect NonLoadableErr)
+// CHECK:         apply [nothrow] [[F]]({{%[0-9]+}}, %0) : $@convention(thin) (@in_guaranteed NonLoadableErr) -> (Int, @error_indirect NonLoadableErr)
+// CHECK:       } // end sil function 'test_indirect_non_loadable_error_nothrow'
+sil [ossa] @test_indirect_non_loadable_error_nothrow : $@convention(thin) (@in_guaranteed NonLoadableErr) -> @error NonLoadableErr {
+bb0(%0 : $*NonLoadableErr):
+  %5 = function_ref @indirect_error : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  %6 = alloc_stack $NonLoadableErr
+  %7 = alloc_stack $Int
+  apply [nothrow] %5<NonLoadableErr>(%7, %6, %0) : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  dealloc_stack %7 : $*Int
+  destroy_addr %6 : $*NonLoadableErr
+  dealloc_stack %6 : $*NonLoadableErr
+  %11 = tuple ()
+  return %11 : $()
+}
+
+// CHECK-LABEL: sil [ossa] @test_indirect_error_thunk :
+// CHECK:         [[F:%.*]] = function_ref @$s14indirect_error4main3ErrV_TG5 : $@convention(thin) (@in_guaranteed Err) -> (@out Int, @error_indirect Err)
+// CHECK:         partial_apply [callee_guaranteed] [[F]]() : $@convention(thin) (@in_guaranteed Err) -> (@out Int, @error_indirect Err)
+// CHECK:       } // end sil function 'test_indirect_error_thunk'
+sil [ossa] @test_indirect_error_thunk : $@convention(thin) () -> @owned (@callee_guaranteed (@in_guaranteed Err) -> (@out Int, @error_indirect Err)) {
+bb0:
+  %5 = function_ref @indirect_error : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  %15 = partial_apply [callee_guaranteed] %5<Err>() : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  return %15 : $@callee_guaranteed (@in_guaranteed Err) -> (@out Int, @error_indirect Err)
+}
+
+// CHECK-LABEL: sil [ossa] @test_indirect_non_loadable_error_thunk :
+// CHECK:         [[F:%.*]] = function_ref @$s14indirect_error4main14NonLoadableErrV_TG5 : $@convention(thin) (@in_guaranteed NonLoadableErr) -> (@out Int, @error_indirect NonLoadableErr)
+// CHECK:         partial_apply [callee_guaranteed] [[F]]() : $@convention(thin) (@in_guaranteed NonLoadableErr) -> (@out Int, @error_indirect NonLoadableErr)
+// CHECK:       } // end sil function 'test_indirect_non_loadable_error_thunk'
+sil [ossa] @test_indirect_non_loadable_error_thunk : $@convention(thin) () -> @owned (@callee_guaranteed (@in_guaranteed NonLoadableErr) -> (@out Int, @error_indirect NonLoadableErr)) {
+bb0:
+  %5 = function_ref @indirect_error : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  %15 = partial_apply [callee_guaranteed] %5<NonLoadableErr>() : $@convention(thin) <τ_0_0 where τ_0_0 : Error> (@in_guaranteed τ_0_0) -> (@out Int, @error_indirect τ_0_0)
+  return %15 : $@callee_guaranteed (@in_guaranteed NonLoadableErr) -> (@out Int, @error_indirect NonLoadableErr)
+}
+
+// CHECK-LABEL: sil shared [transparent] [thunk] [ossa] @$s14indirect_error4main3ErrV_TG5 : $@convention(thin) (@in_guaranteed Err) -> (@out Int, @error_indirect Err) {
+// CHECK:         [[F:%.*]] = function_ref @$s14indirect_error4main3ErrV_Tg5 : $@convention(thin) (Err) -> (Int, @error Err)
+// CHECK:         try_apply [[F]]({{%[0-9]+}}) : $@convention(thin) (Err) -> (Int, @error Err), normal bb1, error bb2
+// CHECK:       bb1([[I:%.*]] : $Int):
+// CHECK:         store [[I]] to [trivial] %0 : $*Int
+// CHECK:       bb2([[E:%.*]] : $Err):
+// CHECK:         store %10 to [trivial] %1 : $*Err
+// CHECK:         throw_addr
+// CHECK:       } // end sil function '$s14indirect_error4main3ErrV_TG5'
+
+// CHECK-LABEL: sil shared [transparent] [thunk] [ossa] @$s14indirect_error4main14NonLoadableErrV_TG5 : $@convention(thin) (@in_guaranteed NonLoadableErr) -> (@out Int, @error_indirect NonLoadableErr) {
+// CHECK:         [[F:%.*]]3 = function_ref @$s14indirect_error4main14NonLoadableErrV_Tg5 : $@convention(thin) (@in_guaranteed NonLoadableErr) -> (Int, @error_indirect NonLoadableErr)
+// CHECK:         try_apply %3(%1, %2) : $@convention(thin) (@in_guaranteed NonLoadableErr) -> (Int, @error_indirect NonLoadableErr), normal bb1, error bb2
+// CHECK:       bb1([[I:%.*]] : $Int):
+// CHECK:         store [[I]] to [trivial] %0 : $*Int
+// CHECK:       bb2:
+// CHECK-NEXT:    throw_addr
+// CHECK:       } // end sil function '$s14indirect_error4main14NonLoadableErrV_TG5'
+

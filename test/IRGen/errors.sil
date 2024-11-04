@@ -1,0 +1,142 @@
+// XFAIL: CPU=powerpc64le
+// XFAIL: CPU=s390x
+// RUN: %target-swift-frontend -primary-file %s -emit-ir | %FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-%target-runtime --check-prefix=CHECK-%target-cpu --check-prefix=CHECK-%target-ptrsize
+
+sil_stage canonical
+
+import Builtin
+import Swift
+
+class A {}
+sil_vtable A {}
+
+sil @create_error : $@convention(thin) () -> @owned Error {
+entry:
+  unreachable
+}
+
+// CHECK-LABEL-i386:   define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr %1) {{.*}} {
+// CHECK-LABEL-x86_64: define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-armv7:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-armv7s: define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-armv7k: define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-arm64:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-arm64e:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-aarch64:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-arm64_32:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-arm64e:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-wasm32:  define swiftcc void @does_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+sil @does_throw : $@convention(thin) () -> @error Error {
+  // CHECK: [[T0:%.*]] = call swiftcc ptr @create_error()
+  %0 = function_ref @create_error : $@convention(thin) () -> @owned Error
+  %1 = apply %0() : $@convention(thin) () -> @owned Error
+
+  // CHECK-NEXT: store ptr [[T0]], ptr %1,
+  // CHECK-NEXT: call swiftcc void @swift_willThrow
+  // CHECK-NEXT: store ptr null, ptr %1,
+  // CHECK-NEXT: store ptr [[T0]], ptr %1,
+  // CHECK-NEXT: ret void
+  builtin "willThrow"(%1 : $Error) : $()
+  throw %1 : $Error
+}
+
+// CHECK-LABEL-i386:   define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr %1) {{.*}} {
+// CHECK-LABEL-x86_64: define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-armv7:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-armv7s: define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-armv7k: define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-arm64:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-arm64e:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-aarch64:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-arm64e:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-arm64_32:  define{{( dllexport)?}}{{( protected)?}} swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+// CHECK-LABEL-wasm32: define swiftcc void @doesnt_throw(ptr swiftself %0, ptr swifterror %1) {{.*}} {
+sil @doesnt_throw : $@convention(thin) () -> @error Error {
+  //   We don't have to do anything here because the caller always
+  //   zeroes the error slot before a call.
+  // CHECK: entry:
+  // CHECK-NEXT:   ret void
+  %0 = tuple ()
+  return %0 : $()
+}
+
+sil @try_apply_helper : $@convention(thin) (@owned AnyObject) -> (@owned AnyObject, @error Error)
+
+// CHECK-objc-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @try_apply(ptr %0)
+// CHECK-native-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @try_apply(ptr %0)
+sil @try_apply : $@convention(thin) (@owned AnyObject) -> () {
+entry(%0 : $AnyObject):
+  // CHECK-i386:        [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]]ptr, align
+  // CHECK-x86_64:      [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-armv7:       [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-armv7s:      [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-armv7k:      [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-arm64:       [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-arm64e:       [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-aarch64:       [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-arm64_32:       [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-powerpc64le: [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-wasm32:      [[ERRORSLOT:%.*]] = alloca [[SWIFTERROR:.*]] ptr, align
+  // CHECK-NEXT: store ptr null, ptr [[ERRORSLOT]], align
+
+  // CHECK-objc-NEXT: [[RESULT:%.*]] = call swiftcc ptr @try_apply_helper(ptr %0, ptr swiftself undef, ptr noalias nocapture [[SWIFTERROR]]{{( )?}}dereferenceable({{.}}) [[ERRORSLOT]])
+  // CHECK-native-NEXT: [[RESULT:%.*]] = call swiftcc ptr @try_apply_helper(ptr %0, ptr swiftself undef, ptr noalias nocapture [[SWIFTERROR]]{{( )?}}dereferenceable({{.}}) [[ERRORSLOT]])
+  // CHECK-NEXT: [[ERR:%.*]] = load ptr, ptr [[ERRORSLOT]], align
+  // CHECK-NEXT: [[T0:%.*]] = icmp ne ptr [[ERR]], null
+  // CHECK-NEXT: ptrtoint ptr [[ERR]] to i
+  // CHECK-NEXT: br i1 [[T0]],
+  %1 = function_ref @try_apply_helper : $@convention(thin) (@owned AnyObject) -> (@owned AnyObject, @error Error)
+  try_apply %1(%0) : $@convention(thin) (@owned AnyObject) -> (@owned AnyObject, @error Error),
+    normal bb1, error bb2
+
+// CHECK-objc:        [[T0:%.*]] = phi ptr [ [[RESULT]],
+// CHECK-objc-NEXT:   call void @swift_unknownObjectRelease(ptr [[T0]])
+// CHECK-native:      [[T0:%.*]] = phi ptr [ [[RESULT]],
+// CHECK-native-NEXT: call void @swift_release(ptr [[T0]])
+// CHECK-NEXT:        br label [[CONT:%[0-9]+]]
+bb1(%2 : $AnyObject):
+  strong_release %2 : $AnyObject
+  br bb3
+
+// CHECK:             [[T0:%.*]] = phi ptr [ [[ERR]],
+// CHECK-NEXT:        store ptr null, ptr [[ERRORSLOT]], align
+// CHECK-objc-NEXT:   call void @swift_errorRelease(ptr [[T0]])
+// CHECK-native-NEXT: call void @swift_release(ptr [[T0]])
+// CHECK-NEXT:        br label [[CONT]]
+bb2(%3 : $Error):
+  release_value %3 : $Error
+  br bb3
+bb3:
+  %4 = tuple ()
+  return %4 : $()
+}
+
+enum ColorError : Error {
+  case Red, Green, Blue
+}
+
+// CHECK-LABEL: TestCallToWillThrowCallBack
+// CHECK: call swiftcc void @swift_willThrow(ptr swiftself undef, ptr noalias nocapture readonly [[SWIFTERROR]]{{( )?}}dereferenceable({{.}}) %2)
+// CHECK: store ptr %0
+// CHECK: ret i64 undef
+sil hidden @TestCallToWillThrowCallBack : $@convention(thin) (@owned Error) -> (Int64, @error Error) {
+bb0(%0 : $Error):
+  builtin "willThrow"(%0 : $Error) : $()
+  throw %0 : $Error                        // id: %3
+}
+
+// rdar://21084084 - Partial application of throwing functions.
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @partial_apply_single(ptr %0)
+// CHECK:       insertvalue { ptr, ptr } { ptr @"$s27partial_apply_single_helperTA{{(\.ptrauth)?}}", ptr undef },
+
+// CHECK: define internal swiftcc void @"$s27partial_apply_single_helperTA"(ptr swiftself %0, ptr noalias nocapture{{( )?}}[[SWIFTERROR]]{{( )?}}dereferenceable({{.}}) %1)
+// CHECK:  tail call swiftcc void @partial_apply_single_helper(ptr {{%.*}}, ptr swiftself undef, ptr noalias nocapture{{( )?}}[[SWIFTERROR]]{{( )?}}dereferenceable({{.}}){{( )?}}{{%.*}})
+// CHECK-NEXT:  ret void
+sil @partial_apply_single : $@convention(thin) (@owned A) -> @callee_owned () -> @error Error {
+entry(%0 : $A):
+  %1 = function_ref @partial_apply_single_helper : $@convention(thin) (@owned A) -> @error Error
+  %2 = partial_apply %1(%0) : $@convention(thin) (@owned A) -> @error Error
+  return %2 : $@callee_owned () -> @error Error
+}
+sil @partial_apply_single_helper : $@convention(thin) (@owned A) -> (@error Error)

@@ -1,0 +1,17 @@
+// RUN: %target-swift-frontend -Xllvm -sil-disable-pass=simplification -emit-ir %s | %FileCheck %s
+
+sil_stage canonical
+
+protocol P { func foo() }
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @phi_witness_method(ptr %T, ptr %T.P) #0 {
+sil @phi_witness_method : $@convention(thin) <T: P> () -> () {
+entry:
+  // CHECK: [[T0_GEP:%.*]] = getelementptr inbounds ptr, ptr %T.P, i32 1
+  // CHECK: [[LOAD:%.*]] = load ptr, ptr [[T0_GEP]],
+  %1 = witness_method $T, #P.foo : $@convention(witness_method: P) <T: P> (@in T) -> ()
+  br bb1(%1 : $@convention(witness_method: P) <T: P> (@in T) -> ())
+
+// CHECK:         phi ptr [ {{.*}}, %entry ]
+bb1(%2 : $@convention(witness_method: P) <T: P> (@in T) -> ()):
+  unreachable
+}

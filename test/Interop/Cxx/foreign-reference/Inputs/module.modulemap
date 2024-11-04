@@ -1,0 +1,60 @@
+module POD {
+  header "pod.h"
+  requires cplusplus
+}
+
+module MoveOnly {
+  header "move-only.h"
+  requires cplusplus
+}
+
+module Singleton {
+  header "singleton.h"
+  requires cplusplus
+}
+
+module Nullable {
+  header "nullable.h"
+  requires cplusplus
+}
+
+module Inheritance {
+  header "inheritance.h"
+  requires cplusplus
+}
+
+module WitnessTable {
+  header "witness-table.h"
+  requires cplusplus
+}
+
+module ReferenceCounted {
+  header "reference-counted.h"
+  requires cplusplus
+}
+
+module ReferenceCountedObjCProperty {
+  header "reference-counted-objc-property.h"
+  requires cplusplus
+  export *
+}
+
+module MemberLayout {
+  header "member-layout.h"
+  requires cplusplus
+}
+
+module MemberInheritance {
+  header "member-inheritance.h"
+  requires cplusplus
+}
+
+module DerivedFieldGetterReturnsOwnedFRT {
+  header "derived-field-getter-returns-owned-frt.h"
+  requires cplusplus
+}
+
+module FunctionsAndMethodsReturningFRT {
+  header "cxx-functions-and-methods-returning-frt.h"
+  requires cplusplus
+}

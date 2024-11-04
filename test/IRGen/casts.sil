@@ -1,0 +1,399 @@
+// RUN: %target-swift-frontend %s -emit-ir -enable-objc-interop -disable-objc-attr-requires-foundation-module | %FileCheck %s -DINT=i%target-ptrsize
+
+// REQUIRES: CPU=i386 || CPU=x86_64
+
+sil_stage canonical
+
+import Builtin
+import Swift
+
+struct NotClass {}
+
+class A {}
+class B: A {}
+
+sil_vtable A {}
+sil_vtable B {}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @unchecked_addr_cast(ptr noalias nocapture dereferenceable({{.*}}) %0) {{.*}} {
+sil @unchecked_addr_cast : $(@in A) -> B {
+entry(%a : $*A):
+  %b = unchecked_addr_cast %a : $*A to $*B
+  %x = load %b : $*B
+  return %x : $B
+}
+
+protocol CP: class {}
+protocol CP2: class {}
+@objc protocol OP: class {}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @ref_to_raw_pointer_existential(ptr %0, ptr %1) {{.*}} {
+// CHECK:         ret ptr %0
+sil @ref_to_raw_pointer_existential : $@convention(thin) (@owned CP) -> Builtin.RawPointer {
+entry(%p : $CP):
+  %r = ref_to_raw_pointer %p : $CP to $Builtin.RawPointer
+  return %r : $Builtin.RawPointer
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @raw_pointer_to_ref_existential(ptr %0) {{.*}} {
+// CHECK:         ret ptr %0
+sil @raw_pointer_to_ref_existential : $@convention(thin) (@owned Builtin.RawPointer) -> AnyObject {
+entry(%p : $Builtin.RawPointer):
+  %r = raw_pointer_to_ref %p : $Builtin.RawPointer to $AnyObject
+  return %r : $AnyObject
+}
+
+sil @unchecked_ref_cast_to_existential : $@convention(thin) (@owned Builtin.NativeObject) -> @owned AnyObject {
+entry(%n : $Builtin.NativeObject):
+  %r = unchecked_ref_cast %n : $Builtin.NativeObject to $AnyObject
+  return %r : $AnyObject
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @u_cast_to_class_existential(ptr %0)
+// CHECK:         call { ptr, ptr } @dynamic_cast_existential_1_unconditional(ptr {{%.*}}, ptr {{%.*}}, {{.*}} @"$s5casts2CPMp"
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} linkonce_odr hidden { ptr, ptr } @dynamic_cast_existential_1_unconditional(ptr %0, ptr %1, ptr %2) {{.*}} {
+// CHECK:         [[WITNESS:%.*]] = call ptr @swift_conformsToProtocol{{(2)?}}(ptr %1, ptr %2)
+// CHECK:         [[IS_NULL:%.*]] = icmp eq ptr [[WITNESS]], null
+// CHECK:         br i1 [[IS_NULL]], label %fail, label %cont
+// CHECK:       cont:
+// CHECK:         [[FIRST:%.*]] = insertvalue { ptr, ptr } undef, ptr %0, 0
+// CHECK:         [[SECOND:%.*]] = insertvalue { ptr, ptr } [[FIRST]], ptr [[WITNESS]], 1
+// CHECK:         ret { ptr, ptr } [[SECOND]]
+// CHECK:       fail:
+// CHECK:         call void @llvm.trap()
+sil @u_cast_to_class_existential : $@convention(thin) (@owned AnyObject) -> @owned CP {
+entry(%a : $AnyObject):
+  %p = unconditional_checked_cast %a : $AnyObject to CP
+  return %p : $CP
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @u_cast_to_existential_metatype(ptr %0)
+// CHECK:         call { ptr, ptr } @dynamic_cast_existential_1_unconditional(ptr %0, ptr %0, {{.*}} @"$s5casts2CPMp"
+sil @u_cast_to_existential_metatype : $@convention(thin) (@owned @thick Any.Type) -> @owned @thick CP.Type {
+entry(%a : $@thick Any.Type):
+  %p = unconditional_checked_cast %a : $@thick Any.Type to @thick CP.Type
+  return %p : $@thick CP.Type
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr, ptr } @u_cast_to_class_existential_2(ptr %0)
+// CHECK:         call { ptr, ptr, ptr } @dynamic_cast_existential_2_unconditional(ptr {{%.*}}, ptr {{%.*}}, {{.*}} @"$s5casts2CPMp"{{[^,]*}}, {{.*}} @"$s5casts3CP2Mp"
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} linkonce_odr hidden { ptr, ptr, ptr } @dynamic_cast_existential_2_unconditional(ptr %0, ptr %1, ptr %2, ptr %3)
+// CHECK:         [[WITNESS:%.*]] = call ptr @swift_conformsToProtocol{{(2)?}}(ptr %1, ptr %2)
+// CHECK:         [[IS_NULL:%.*]] = icmp eq ptr [[WITNESS]], null
+// CHECK:         br i1 [[IS_NULL]], label %fail, label %cont
+// CHECK:       cont:
+// CHECK:         [[WITNESS:%.*]] = call ptr @swift_conformsToProtocol{{(2)?}}(ptr %1, ptr %3)
+// CHECK:         [[IS_NULL:%.*]] = icmp eq ptr [[WITNESS]], null
+// CHECK:         br i1 [[IS_NULL]], label %fail, label %cont1
+// CHECK:       cont1:
+// CHECK:         ret { ptr, ptr, ptr }
+// CHECK:       fail:
+// CHECK:         call void @llvm.trap()
+sil @u_cast_to_class_existential_2 : $@convention(thin) (@owned AnyObject) -> @owned CP & CP2 {
+entry(%a : $AnyObject):
+  %p = unconditional_checked_cast %a : $AnyObject to CP & CP2
+  return %p : $CP & CP2
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr, ptr } @u_cast_to_class_existential_mixed(ptr %0)
+// CHECK:         call ptr @swift_dynamicCastObjCProtocolUnconditional
+// CHECK:         call { ptr, ptr, ptr } @dynamic_cast_existential_2_unconditional(ptr {{%.*}}, ptr {{%.*}}, {{.*}} @"$s5casts2CPMp"{{[^,]*}}, {{.*}} @"$s5casts3CP2Mp"
+sil @u_cast_to_class_existential_mixed : $@convention(thin) (@owned AnyObject) -> @owned CP & OP & CP2 {
+entry(%a : $AnyObject):
+  %p = unconditional_checked_cast %a : $AnyObject to CP & OP & CP2
+  return %p : $CP & OP & CP2
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr, ptr } @u_cast_to_existential_metatype_mixed(ptr %0)
+// CHECK:         call ptr @swift_dynamicCastTypeToObjCProtocolUnconditional(ptr %0, {{(i32|i64)}} 1, ptr {{%.*}})
+// CHECK:         [[CAST:%.*]] = call { ptr, ptr, ptr } @dynamic_cast_existential_2_unconditional(ptr {{.*}}, ptr %0, {{.*}} @"$s5casts2CPMp"{{[^,]*}}, {{.*}} @"$s5casts3CP2Mp"
+// CHECK:         [[OBJPTR:%.*]] = extractvalue { ptr, ptr, ptr } [[CAST]], 0
+// CHECK:         insertvalue {{.*}} [[OBJPTR]]
+sil @u_cast_to_existential_metatype_mixed : $@convention(thin) (@owned @thick Any.Type) -> @owned @thick (CP & OP & CP2).Type {
+entry(%a : $@thick Any.Type):
+  %p = unconditional_checked_cast %a : $@thick Any.Type to @thick (CP & OP & CP2).Type
+  return %p : $@thick (CP & OP & CP2).Type
+}
+
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @c_cast_to_class_existential(ptr %0)
+// CHECK:         call { ptr, ptr } @dynamic_cast_existential_1_conditional(ptr {{.*}}, ptr %.Type, {{.*}} @"$s5casts2CPMp"
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} linkonce_odr hidden { ptr, ptr } @dynamic_cast_existential_1_conditional(ptr %0, ptr %1, ptr %2)
+// CHECK:         [[WITNESS:%.*]] = call ptr @swift_conformsToProtocol{{(2)?}}(ptr %1, ptr %2)
+// CHECK:         [[IS_NULL:%.*]] = icmp eq ptr [[WITNESS]], null
+// CHECK:         br i1 [[IS_NULL]], label %fail, label %cont
+// CHECK:       cont:
+// CHECK:         ret { ptr, ptr }
+// CHECK:       fail:
+// CHECK:         ret { ptr, ptr } zeroinitializer
+sil @c_cast_to_class_existential : $@convention(thin) (@owned AnyObject) -> @owned CP {
+entry(%a : $AnyObject):
+  checked_cast_br AnyObject in %a : $AnyObject to CP, yea, nay
+yea(%p : $CP):
+  return %p : $CP
+nay:
+  unreachable
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @c_cast_to_existential_metatype(ptr %0) {{.*}} {
+// CHECK:         call { ptr, ptr } @dynamic_cast_existential_1_conditional(ptr %0, ptr %0, {{.*}} @"$s5casts2CPMp"
+sil @c_cast_to_existential_metatype : $@convention(thin) (@owned @thick Any.Type) -> @owned @thick CP.Type {
+entry(%a : $@thick Any.Type):
+  checked_cast_br Any.Type in %a : $@thick Any.Type to @thick CP.Type, yea, nay
+yea(%p : $@thick CP.Type):
+  return %p : $@thick CP.Type
+nay:
+  unreachable
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr, ptr } @c_cast_to_class_existential_2(ptr %0)
+// CHECK:         call { ptr, ptr, ptr } @dynamic_cast_existential_2_conditional(ptr {{%.*}}, ptr {{%.*}}, {{.*}} @"$s5casts2CPMp"{{[^,]*}}, {{.*}} @"$s5casts3CP2Mp"
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} linkonce_odr hidden { ptr, ptr, ptr } @dynamic_cast_existential_2_conditional(ptr %0, ptr %1, ptr %2, ptr %3)
+// CHECK:         [[WITNESS:%.*]] = call ptr @swift_conformsToProtocol{{(2)?}}(ptr %1, ptr %2)
+// CHECK:         [[IS_NULL:%.*]] = icmp eq ptr [[WITNESS]], null
+// CHECK:         br i1 [[IS_NULL]], label %fail, label %cont
+// CHECK:       cont:
+// CHECK:         [[WITNESS:%.*]] = call ptr @swift_conformsToProtocol{{(2)?}}(ptr %1, ptr %3)
+// CHECK:         [[IS_NULL:%.*]] = icmp eq ptr [[WITNESS]], null
+// CHECK:         br i1 [[IS_NULL]], label %fail, label %cont1
+// CHECK:       cont1:
+// CHECK:         ret { ptr, ptr, ptr }
+// CHECK:       fail:
+// CHECK:         ret { ptr, ptr, ptr } zeroinitializer
+sil @c_cast_to_class_existential_2 : $@convention(thin) (@owned AnyObject) -> @owned CP & CP2 {
+entry(%a : $AnyObject):
+  checked_cast_br AnyObject in %a : $AnyObject to CP & CP2, yea, nay
+yea(%p : $CP & CP2):
+  return %p : $CP & CP2
+nay:
+  unreachable
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr, ptr } @c_cast_to_class_existential_mixed(ptr %0)
+// CHECK:         [[CAST:%.*]] = call ptr @swift_dynamicCastObjCProtocolConditional
+// CHECK:         [[IS_NULL:%.*]] = icmp eq ptr [[CAST]], null
+// CHECK:         br i1 [[IS_NULL]], label %cont, label %success
+// CHECK:       success:
+// CHECK:         call { ptr, ptr, ptr } @dynamic_cast_existential_2_conditional(ptr {{%.*}}, ptr {{%.*}}, {{.*}} @"$s5casts2CPMp"{{[^,]*}}, {{.*}} @"$s5casts3CP2Mp"
+// CHECK:         br label %cont
+// CHECK:       cont:
+// CHECK:         phi ptr [ [[CAST:%.*]], %success ], [ null, %entry ]
+sil @c_cast_to_class_existential_mixed : $@convention(thin) (@owned AnyObject) -> @owned CP & OP & CP2 {
+entry(%a : $AnyObject):
+  checked_cast_br AnyObject in %a : $AnyObject to CP & OP & CP2, yea, nay
+yea(%p : $CP & OP & CP2):
+  return %p : $CP & OP & CP2
+nay:
+  unreachable
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr, ptr } @c_cast_to_existential_metatype_mixed(ptr %0)
+// CHECK:         [[OBJC_CAST:%.*]] = call ptr @swift_dynamicCastTypeToObjCProtocolConditional(ptr %0, {{(i32|i64)}} 1, ptr {{%.*}})
+// CHECK:         [[IS_NULL:%.*]] = icmp eq ptr [[OBJC_CAST]], null
+// CHECK:         br i1 [[IS_NULL]], label %cont, label %success
+// CHECK:       success:
+// CHECK:         call { ptr, ptr, ptr } @dynamic_cast_existential_2_conditional(ptr {{.*}}, ptr %0, {{.*}} @"$s5casts2CPMp"{{[^,]*}}, {{.*}} @"$s5casts3CP2Mp"
+sil @c_cast_to_existential_metatype_mixed : $@convention(thin) (@owned @thick Any.Type) -> @owned @thick (CP & OP & CP2).Type {
+entry(%a : $@thick Any.Type):
+  checked_cast_br Any.Type in %a : $@thick Any.Type to @thick (CP & OP & CP2).Type, yea, nay
+yea(%p : $@thick (CP & OP & CP2).Type):
+  return %p : $@thick (CP & OP & CP2).Type
+nay:
+  unreachable
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @checked_upcast(ptr %0) {{.*}} {
+// -- Don't need to check conformance of an object to AnyObject.
+// CHECK-NOT:     call ptr @swift_dynamicCastObjCProtocolConditional
+// CHECK:         phi ptr
+sil @checked_upcast : $@convention(thin) (@owned A) -> @owned AnyObject {
+entry(%a : $A):
+  checked_cast_br A in %a : $A to AnyObject, yea, nay
+yea(%o : $AnyObject):
+  return %o : $AnyObject
+nay:
+  unreachable
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @checked_downcast_optional({{(i32|i64)}} %0) {{.*}} {
+// CHECK:         [[T0:%.*]] = inttoptr {{(i32|i64)}} %0 to ptr
+// CHECK:         [[T1:%.*]] = call swiftcc %swift.metadata_response @"$s5casts1ACMa"([[INT]] 0)
+// CHECK:         [[METADATA:%.*]] = extractvalue %swift.metadata_response [[T1]], 0
+// CHECK:         [[RESULT_PTR:%.*]] = call ptr @swift_dynamicCastClass(ptr [[T0]], ptr [[METADATA]])
+// CHECK:         [[COND:%.*]] = icmp ne ptr [[RESULT_PTR]], null
+// CHECK:         br i1 [[COND]]
+sil @checked_downcast_optional : $@convention(thin) (Optional<A>) -> @owned A {
+entry(%a : $Optional<A>):
+  checked_cast_br Optional<A> in %a : $Optional<A> to A, yea, nay
+yea(%aa : $A):
+  return %aa : $A
+nay:
+  unreachable
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @checked_downcast_optional_metatype({{(i32|i64)}} %0) {{.*}} {
+// CHECK:         [[VALUE:%.*]] = inttoptr {{(i32|i64)}} %0 to ptr
+// CHECK:         [[T0:%.*]] = call swiftcc %swift.metadata_response @"$s5casts1BCMa"([[INT]] 0)
+// CHECK:         [[METADATA:%.*]] = extractvalue %swift.metadata_response [[T0]], 0
+// CHECK:         [[RESULT:%.*]] = call ptr @swift_dynamicCastMetatype(ptr [[VALUE]], ptr [[METADATA]])
+// CHECK:         [[COND:%.*]] = icmp ne ptr [[RESULT]], null
+// CHECK:         br i1 [[COND]]
+sil @checked_downcast_optional_metatype : $@convention(thin) (Optional<@thick A.Type>) -> @thick B.Type {
+entry(%a : $Optional<@thick A.Type>):
+  checked_cast_br Optional<@thick A.Type> in %a : $Optional<@thick A.Type> to @thick B.Type, yea, nay
+yea(%b : $@thick B.Type):
+  return %b : $@thick B.Type
+nay:
+  unreachable
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @checked_downcast_optional_exmetatype({{(i32 %0, i32 %1|i64 %0, i64 %1)}}) {{.*}} {
+// CHECK:         [[VALUE:%.*]] = inttoptr {{(i32|i64)}} %0 to ptr
+// CHECK:         [[T0:%.*]] = call swiftcc %swift.metadata_response @"$s5casts1BCMa"([[INT]] 0)
+// CHECK:         [[METADATA:%.*]] = extractvalue %swift.metadata_response [[T0]], 0
+// CHECK:         [[RESULT:%.*]] = call ptr @swift_dynamicCastMetatype(ptr [[VALUE]], ptr [[METADATA]])
+// CHECK:         [[COND:%.*]] = icmp ne ptr [[RESULT]], null
+// CHECK:         br i1 [[COND]]
+sil @checked_downcast_optional_exmetatype : $@convention(thin) (Optional<@thick CP.Type>) -> @thick B.Type {
+entry(%a : $Optional<@thick CP.Type>):
+  checked_cast_br Optional<@thick CP.Type> in %a : $Optional<@thick CP.Type> to @thick B.Type, yea, nay
+yea(%b : $@thick B.Type):
+  return %b : $@thick B.Type
+nay:
+  unreachable
+}
+
+// CHECK: define {{(dllexport )?}}{{(protected )?}}swiftcc {{.*}} @checked_downcast_optional_class_to_ex([[INT]] %0)
+// CHECK: entry:
+// CHECK:   [[V1:%.*]] = inttoptr [[INT]] %0 to ptr
+// CHECK:   [[V2:%.*]] = icmp ne ptr [[V1]], null
+// CHECK:   br i1 [[V2]], label %[[LBL:.*]], label
+// CHECK:    [[LBL]]:
+// CHECK:    load ptr, ptr [[V1]]
+sil @checked_downcast_optional_class_to_ex : $@convention(thin) (@guaranteed Optional<A>) -> @owned Optional<CP> {
+bb0(%0 : $Optional<A>):
+  checked_cast_br Optional<A> in %0 : $Optional<A> to CP, bb1, bb2
+
+bb1(%3 : $CP):
+  %4 = enum $Optional<CP>, #Optional.some!enumelt, %3 : $CP
+  retain_value %0 : $Optional<A>
+  br bb3(%4 : $Optional<CP>)
+
+bb2:
+  %7 = enum $Optional<CP>, #Optional.none!enumelt
+  br bb3(%7 : $Optional<CP>)
+
+bb3(%9 : $Optional<CP>):
+  return %9 : $Optional<CP>
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @checked_metatype_to_object_casts
+sil @checked_metatype_to_object_casts : $@convention(thin) <T> (@thick Any.Type) -> () {
+entry(%e : $@thick Any.Type):
+  %a = metatype $@thick NotClass.Type
+  // CHECK: call zeroext i1 @swift_dynamicCast({{.*}})
+  checked_cast_br NotClass.Type in %a : $@thick NotClass.Type to AnyObject, a_yea, a_nay
+a_yea(%1 : $AnyObject):
+  %b = metatype $@thick A.Type
+  checked_cast_br A.Type in %b : $@thick A.Type to AnyObject, b_yea, b_nay
+b_yea(%2 : $AnyObject):
+  %c = metatype $@objc_metatype A.Type
+  checked_cast_br @objc_metatype A.Type in %c : $@objc_metatype A.Type to AnyObject, c_yea, c_nay
+c_yea(%3 : $AnyObject):
+  %d = metatype $@thick T.Type
+  // CHECK: call ptr @swift_dynamicCastMetatypeToObjectConditional(ptr %T)
+  checked_cast_br T.Type in %d : $@thick T.Type to AnyObject, d_yea, d_nay
+d_yea(%4 : $AnyObject):
+  // CHECK: call ptr @swift_dynamicCastMetatypeToObjectConditional(ptr %0)
+  checked_cast_br Any.Type in %e : $@thick Any.Type to AnyObject, e_yea, e_nay
+e_yea(%5 : $AnyObject):
+  return undef : $()
+a_nay:
+  unreachable
+b_nay:
+  unreachable
+c_nay:
+  unreachable
+d_nay:
+  unreachable
+e_nay:
+  unreachable
+}
+
+@objc class OA {}
+sil_vtable OA {}
+sil hidden @$s5casts2OACACycfcTo : $@convention(thin) (OA) -> OA {
+entry(%x : $OA):
+  return %x : $OA
+}
+
+@objc class OB {}
+sil_vtable OB {}
+sil hidden @$s5casts2OBCACycfcTo : $@convention(thin) (OB) -> OB {
+entry(%x : $OB):
+  return %x : $OB
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @checked_object_to_object_casts(ptr %0)
+// CHECK:         @swift_dynamicCastClassUnconditional
+sil @checked_object_to_object_casts : $@convention(thin) (A) -> B {
+entry(%a : $A):
+  %b = unconditional_checked_cast %a : $A to B
+  return %b : $B
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @checked_objc_object_to_object_casts(ptr %0)
+// CHECK:         @swift_dynamicCastClassUnconditional
+sil @checked_objc_object_to_object_casts : $@convention(thin) (OA) -> OB {
+entry(%a : $OA):
+  %b = unconditional_checked_cast %a : $OA to OB
+  return %b : $OB
+}
+
+protocol P {}
+protocol PAnyObject: AnyObject {}
+class C {}
+sil_vtable C {}
+
+// CHECK-LABEL: define{{.*}} @cast_protocol_composition_with_anyobject
+// CHECK: [[C:%.*]] = call swiftcc %swift.metadata_response @"$s5casts1CCMa"
+// CHECK: [[C_META:%.*]] = extractvalue %swift.metadata_response [[C]], 0
+// CHECK: call { ptr, ptr } @dynamic_cast_existential_1_superclass_conditional({{.*}}, ptr [[C_META]], ptr {{.*}}@"$s5casts1PMp"
+
+sil @cast_protocol_composition_with_anyobject : $@convention(thin) (@owned P & AnyObject ) -> @owned Optional<C & P> {
+bb0(%0: $P & AnyObject):
+  checked_cast_br P & AnyObject in %0 : $P & AnyObject to C & P, bb1, bb2
+
+bb1(%2 : $C & P):
+  %3 = enum $Optional<C & P>, #Optional.some!enumelt, %2 : $C & P
+  br bb3(%3 : $Optional<C & P>)
+
+bb2:
+  strong_release %0 : $P & AnyObject
+  %6 = enum $Optional<C & P>, #Optional.none!enumelt
+  br bb3(%6 : $Optional<C & P>)
+
+bb3(%11 : $Optional<C & P>):
+  return %11 : $Optional<C & P>
+}
+
+// CHECK-LABEL: define{{.*}} @cast_protocol_with_anyobject
+// CHECK: [[C:%.*]] = call swiftcc %swift.metadata_response @"$s5casts1CCMa"
+// CHECK: [[C_META:%.*]] = extractvalue %swift.metadata_response [[C]], 0
+// CHECK: call { ptr, ptr } @dynamic_cast_existential_1_superclass_conditional({{.*}}, ptr [[C_META]], ptr {{.*}}@"$s5casts10PAnyObjectMp"
+sil @cast_protocol_with_anyobject : $@convention(thin) (@owned PAnyObject ) -> @owned Optional<C & PAnyObject> {
+bb0(%0: $PAnyObject):
+  checked_cast_br PAnyObject in %0 : $PAnyObject to C & PAnyObject, bb1, bb2
+
+bb1(%2 : $C & PAnyObject):
+  %3 = enum $Optional<C & PAnyObject>, #Optional.some!enumelt, %2 : $C & PAnyObject
+  br bb3(%3 : $Optional<C & PAnyObject>)
+
+bb2:
+  strong_release %0 : $PAnyObject
+  %6 = enum $Optional<C & PAnyObject>, #Optional.none!enumelt
+  br bb3(%6 : $Optional<C & PAnyObject>)
+
+bb3(%11 : $Optional<C & PAnyObject>):
+  return %11 : $Optional<C & PAnyObject>
+}

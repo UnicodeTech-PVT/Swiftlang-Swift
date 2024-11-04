@@ -1,0 +1,121 @@
+{
+  key.results: [
+    {
+      key.typename: "Direction",
+      key.typeusr: "$s17typecontext_basic9DirectionOD",
+      key.implicitmembers: [
+        {
+          key.name: "east",
+          key.description: "east",
+          key.sourcetext: "east"
+        },
+        {
+          key.name: "west",
+          key.description: "west",
+          key.sourcetext: "west"
+        },
+        {
+          key.name: "vector(x:y:)",
+          key.description: "vector(x: Int, y: Int)",
+          key.sourcetext: "vector(x: <#T##Int#>, y: <#T##Int#>)"
+        },
+        {
+          key.name: "distance(_:)",
+          key.description: "distance(Int)",
+          key.sourcetext: "distance(<#T##Int#>)"
+        }
+      ]
+    },
+    {
+      key.typename: "Target",
+      key.typeusr: "$s17typecontext_basic6TargetVD",
+      key.implicitmembers: [
+        {
+          key.name: "me",
+          key.description: "me",
+          key.doc.brief: "Mine.",
+          key.sourcetext: "me"
+        },
+        {
+          key.name: "you",
+          key.description: "you",
+          key.doc.brief: "Yours.",
+          key.sourcetext: "you"
+        },
+        {
+          key.name: "them",
+          key.description: "them",
+          key.doc.brief: "Theirs.",
+          key.sourcetext: "them"
+        },
+        {
+          key.name: "all",
+          key.description: "all",
+          key.doc.brief: "One for all.",
+          key.sourcetext: "all"
+        }
+      ]
+    }
+  ]
+}
+{
+  key.results: [
+    {
+      key.typename: "Direction",
+      key.typeusr: "$s17typecontext_basic9DirectionOD",
+      key.implicitmembers: [
+        {
+          key.name: "east",
+          key.description: "east",
+          key.sourcetext: "east"
+        },
+        {
+          key.name: "west",
+          key.description: "west",
+          key.sourcetext: "west"
+        },
+        {
+          key.name: "vector(x:y:)",
+          key.description: "vector(x: Int, y: Int)",
+          key.sourcetext: "vector(x: <#T##Int#>, y: <#T##Int#>)"
+        },
+        {
+          key.name: "distance(_:)",
+          key.description: "distance(Int)",
+          key.sourcetext: "distance(<#T##Int#>)"
+        }
+      ]
+    },
+    {
+      key.typename: "Target",
+      key.typeusr: "$s17typecontext_basic6TargetVD",
+      key.implicitmembers: [
+        {
+          key.name: "me",
+          key.description: "me",
+          key.doc.brief: "Mine.",
+          key.sourcetext: "me"
+        },
+        {
+          key.name: "you",
+          key.description: "you",
+          key.doc.brief: "Yours.",
+          key.sourcetext: "you"
+        },
+        {
+          key.name: "them",
+          key.description: "them",
+          key.doc.brief: "Theirs.",
+          key.sourcetext: "them"
+        },
+        {
+          key.name: "all",
+          key.description: "all",
+          key.doc.brief: "One for all.",
+          key.sourcetext: "all"
+        }
+      ]
+    }
+  ],
+  key.reusingastcontext: 1
+}

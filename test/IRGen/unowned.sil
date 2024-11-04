@@ -1,0 +1,94 @@
+// RUN: %target-swift-frontend -disable-objc-interop -disable-type-layout -emit-ir %s | %FileCheck %s
+
+// REQUIRES: CPU=x86_64
+
+// CHECK-DAG: [[TYPE:%swift.type]] = type
+// CHECK-DAG: [[A:%T7unowned1AV]] = type <{ %swift.unowned }>
+
+import Builtin
+
+class C {}
+sil_vtable C {}
+
+typealias AnyObject = Builtin.AnyObject
+protocol P : class {
+  func explode()
+}
+
+sil @$s7unowned1CCfD : $@convention(method) (C) -> ()
+
+struct A {
+  unowned var x : C
+}
+
+sil @test_weak_rr_class : $@convention(thin) (@sil_unowned C) -> () {
+bb0(%0 : $@sil_unowned C):
+  unowned_retain %0 : $@sil_unowned C
+  unowned_release %0 : $@sil_unowned C
+  %3 = tuple ()
+  return %3 : $()
+}
+// CHECK:    define{{( dllexport)?}}{{( protected)?}} swiftcc void @test_weak_rr_class(ptr %0) {{.*}} {
+// CHECK:      call ptr @swift_unownedRetain(ptr returned %0)
+// CHECK-NEXT: call void @swift_unownedRelease(ptr %0)
+// CHECK-NEXT: ret void
+
+sil @test_weak_rr_proto : $@convention(thin) (@sil_unowned P) -> () {
+bb0(%0 : $@sil_unowned P):
+  unowned_retain %0 : $@sil_unowned P
+  unowned_release %0 : $@sil_unowned P
+  %3 = tuple ()
+  return %3 : $()
+}
+// CHECK:    define{{( dllexport)?}}{{( protected)?}} swiftcc void @test_weak_rr_proto(ptr %0, ptr %1) {{.*}} {
+// CHECK:      call ptr @swift_unownedRetain(ptr returned %0)
+// CHECK:      call void @swift_unownedRelease(ptr %0)
+// CHECK-NEXT: ret void
+
+// Value witnesses for A:
+
+//   initializeBufferWithCopyOfBuffer
+// CHECK:    define internal ptr @"$s7unowned1AVwCP"(ptr noalias [[DESTBUF:%.*]], ptr noalias [[SRCBUF:%.*]], ptr
+// CHECK: [[T0:%.*]] = getelementptr inbounds [[A]], ptr [[DESTBUF]], i32 0, i32 0
+// CHECK-NEXT: [[T1:%.*]] = getelementptr inbounds [[A]], ptr [[SRCBUF]], i32 0, i32 0
+// CHECK-NEXT: [[T2:%.*]] = load ptr, ptr [[T1]], align 8
+// CHECK-NEXT: call ptr @swift_unownedRetain(ptr returned [[T2]])
+// CHECK-NEXT: store ptr [[T2]], ptr [[T0]], align 8
+// CHECK-NEXT: ret ptr [[DESTBUF]]
+
+//   destroy
+// CHECK:    define internal void @"$s7unowned1AVwxx"(ptr noalias [[ARG:%.*]], ptr
+// CHECK: [[T1:%.*]] = getelementptr inbounds [[A]], ptr [[ARG]], i32 0, i32 0
+// CHECK-NEXT: [[T2:%.*]] = load ptr, ptr [[T1]], align 8
+// CHECK-NEXT: call void @swift_unownedRelease(ptr [[T2]])
+// CHECK-NEXT: ret void
+
+//   initializeWithCopy
+// CHECK:    define internal ptr @"$s7unowned1AVwcp"(ptr noalias [[DEST_OPQ:%.*]], ptr noalias [[SRC_OPQ:%.*]], ptr
+// CHECK: [[T0:%.*]] = getelementptr inbounds [[A]], ptr [[DEST_OPQ]], i32 0, i32 0
+// CHECK-NEXT: [[T1:%.*]] = getelementptr inbounds [[A]], ptr [[SRC_OPQ]], i32 0, i32 0
+// CHECK-NEXT: [[T2:%.*]] = load ptr, ptr [[T1]], align 8
+// CHECK-NEXT: call ptr @swift_unownedRetain(ptr returned [[T2]])
+// CHECK-NEXT: store ptr [[T2]], ptr [[T0]], align 8
+// CHECK-NEXT: ret ptr [[DEST_OPQ]]
+
+//   assignWithCopy
+// CHECK:    define internal ptr @"$s7unowned1AVwca"(ptr [[DEST_OPQ:%.*]], ptr [[SRC_OPQ:%.*]], ptr
+// CHECK: [[DEST_X:%.*]] = getelementptr inbounds [[A]], ptr [[DEST_OPQ]], i32 0, i32 0
+// CHECK-NEXT: [[SRC_X:%.*]] = getelementptr inbounds [[A]], ptr [[SRC_OPQ]], i32 0, i32 0
+// CHECK-NEXT: [[NEW:%.*]] = load ptr, ptr [[SRC_X]], align 8
+// CHECK-NEXT: call ptr @swift_unownedRetain(ptr returned [[NEW]])
+// CHECK-NEXT: [[OLD:%.*]] = load ptr, ptr [[DEST_X]], align 8
+// CHECK-NEXT: store ptr [[NEW]], ptr [[DEST_X]], align 8
+// CHECK-NEXT: call void @swift_unownedRelease(ptr [[OLD]])
+// CHECK-NEXT: ret ptr [[DEST_OPQ]]
+
+//   assignWithTake
+// CHECK:    define internal ptr @"$s7unowned1AVwta"(ptr noalias [[DEST_OPQ:%.*]], ptr noalias [[SRC_OPQ:%.*]], ptr
+// CHECK: [[DEST_X:%.*]] = getelementptr inbounds [[A]], ptr [[DEST_OPQ]], i32 0, i32 0
+// CHECK-NEXT: [[SRC_X:%.*]] = getelementptr inbounds [[A]], ptr [[SRC_OPQ]], i32 0, i32 0
+// CHECK-NEXT: [[NEW:%.*]] = load ptr, ptr [[SRC_X]], align 8
+// CHECK-NEXT: [[OLD:%.*]] = load ptr, ptr [[DEST_X]], align 8
+// CHECK-NEXT: store ptr [[NEW]], ptr [[DEST_X]], align 8
+// CHECK-NEXT: call void @swift_unownedRelease(ptr [[OLD]])
+// CHECK-NEXT: ret ptr [[DEST_OPQ]]

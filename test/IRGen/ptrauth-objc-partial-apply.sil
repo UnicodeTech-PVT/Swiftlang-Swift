@@ -1,0 +1,34 @@
+// RUN: %swift -swift-version 4 -target arm64e-apple-ios12.0 -parse-stdlib -parse-as-library %s -emit-ir -module-name test -Xcc -Xclang -Xcc -fptrauth-calls | %FileCheck %s --check-prefix=CHECK
+// REQUIRES: objc_interop
+
+// REQUIRES: CPU=arm64e
+// REQUIRES: OS=ios
+
+
+@objc class A {
+  @objc func foo() {}
+}
+
+sil_vtable A {}
+
+sil hidden @$s4test1AC3fooyyF : $@convention(method) (@guaranteed A) -> () {
+bb0(%0 : $A):
+  unreachable
+}
+sil hidden [thunk] @$s4test1AC3fooyyFTo : $@convention(objc_method) (A) -> () {
+bb0(%0 : $A):
+  unreachable
+}
+
+// The partial apply was optimized.
+// CHECK-LABEL: define swiftcc void @test0(
+// CHECK:  %1 = load ptr, ptr @"\01L_selector(foo)"
+// CHECK:  call void @objc_msgSend(ptr %0, ptr %1)
+sil @test0 : $@convention(thin) (@guaranteed A) -> () {
+bb0(%0: $A):
+  %method = objc_method %0 : $A, #A.foo!foreign, $@convention(objc_method) (A) -> ()
+  %partial = partial_apply [callee_guaranteed] %method(%0) : $@convention(objc_method) (A) -> ()
+  apply %partial() : $ @callee_guaranteed () -> ()
+  %result = tuple ()
+  return %result : $()
+}

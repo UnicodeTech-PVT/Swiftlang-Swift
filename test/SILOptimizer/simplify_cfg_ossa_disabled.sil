@@ -1,0 +1,302 @@
+// RUN: %target-sil-opt -enable-objc-interop -enforce-exclusivity=none -enable-sil-verify-all %s -update-borrowed-from -jumpthread-simplify-cfg | %FileCheck %s
+//
+// These tests case are converted to OSSA form, but aren't yet
+// optimized in OSSA mode. Move them to one of these files when
+// they are enabled:
+// - simplify_cfg_ossa.sil
+// - simplify_cfg_simplejumpthread.sil
+// - simplify_cfg_checkcast.sil
+// - simplify_cfg_domjumpthread.sil
+//
+
+sil_stage canonical
+
+import Builtin
+import Swift
+
+class C {
+  var value: Int32
+}
+
+enum BoolLike { case true_, false_ }
+
+internal enum EnumC {
+  case one
+  case two(C)
+}
+
+enum OneCase {
+  case First
+}
+
+struct FakeBool {
+  @_hasStorage var value: Builtin.Int1 { get set }
+  init(value: Builtin.Int1)
+}
+
+class Klass {}
+
+sil @external_f : $@convention(thin) () -> ()
+
+// We should be able to compile this down to returning the parameter
+// but we're not quite there yet.
+// TODO-CHECK-LABEL: @nop
+// TODO-CHECK: cond_br %1, bb2, bb1
+// TODO-CHECK: bb1:
+// TODO-CHECK:   br bb3
+// TODO-CHECK: bb2:
+// TODO-CHECK:   br bb3
+// TODO-CHECK: bb3
+// TODO-CHECK-NOT: struct_extract
+// TODO-CHECK: return
+// TODO-CHECK-NOT: bb4
+// TODO-CHECK-NOT: bb5
+sil [ossa] @nop : $@convention(thin) (Bool) -> Bool {
+bb0(%0 : $Bool):
+  %1 = struct_extract %0 : $Bool, #Bool._value
+  cond_br %1, bb1, bb2
+
+bb1:
+  %3 = integer_literal $Builtin.Int1, 0
+  %4 = struct $Bool (%3 : $Builtin.Int1)
+  br bb3(%4 : $Bool)
+
+bb2:
+  %6 = integer_literal $Builtin.Int1, -1
+  %7 = struct $Bool (%6 : $Builtin.Int1)
+  br bb3(%7 : $Bool)
+
+bb3(%9 : $Bool):
+  %10 = struct_extract %9 : $Bool, #Bool._value
+  cond_br %10, bb4, bb5
+
+bb4:
+  %12 = integer_literal $Builtin.Int1, 0
+  %13 = struct $Bool (%12 : $Builtin.Int1)
+  br bb6(%13 : $Bool)
+
+bb5:
+  %15 = integer_literal $Builtin.Int1, -1
+  %16 = struct $Bool (%15 : $Builtin.Int1)
+  br bb6(%16 : $Bool)
+
+bb6(%18 : $Bool):
+  return %18 : $Bool
+}
+
+// We don't look through copies, so the redundant switch_enum does not get optimized away.
+sil [ossa] @redundant_switchenum_owned : $@convention(thin) (@owned Optional<C>) -> Int32 {
+bb0(%0 : @owned $Optional<C>):
+  %1 = copy_value %0 : $Optional<C>
+  switch_enum %1 : $Optional<C>, case #Optional.some!enumelt: bb1, case #Optional.none!enumelt: bb2
+
+bb1(%1b : @owned $C):
+  destroy_value %1b : $C
+  %9 = integer_literal $Builtin.Int1, -1
+  %10 = struct $Bool (%9 : $Builtin.Int1)
+  br bb3(%10 : $Bool)
+
+bb2:
+  %17 = integer_literal $Builtin.Int1, 0
+  %18 = struct $Bool (%17 : $Builtin.Int1)
+  br bb3(%18 : $Bool)
+
+bb3(%12 : $Bool):
+  %15 = struct_extract %12 : $Bool, #Bool._value
+  cond_br %15, bb4, bb7
+
+bb4:
+  %21 = alloc_stack $Optional<C>
+  %0b = copy_value %0 : $Optional<C>
+  store %0b to [init] %21 : $*Optional<C>
+  %0c = copy_value %0 : $Optional<C>
+  switch_enum %0c : $Optional<C>, case #Optional.some!enumelt: bb5, case #Optional.none!enumelt: bb6
+
+bb5(%0cC : @owned $C):
+  destroy_value %0cC : $C
+  %25 = unchecked_take_enum_data_addr %21 : $*Optional<C>, #Optional.some!enumelt
+  %26 = load [take] %25 : $*C
+  dealloc_stack %21 : $*Optional<C>
+  %26a = begin_borrow %26 : $C
+  %29 = ref_element_addr %26a : $C, #C.value
+  %30 = load [trivial] %29 : $*Int32
+  end_borrow %26a : $C
+  destroy_value %26 : $C
+  br bb8(%30 : $Int32)
+
+bb6:
+  %34 = builtin "int_trap"() : $()
+  unreachable
+
+bb7:
+  %36 = integer_literal $Builtin.Int32, 0
+  %37 = struct $Int32 (%36 : $Builtin.Int32)
+  br bb8(%37 : $Int32)
+
+bb8(%39 : $Int32):
+  destroy_value %0 : $Optional<C>
+  return %39 : $Int32
+}
+
+// TODO: The optimization does not yet handle unused payload arguments.
+//
+// TODO-CHECK-LABEL: sil [ossa] @identical_switch_enum_dests : $@convention(thin) (Optional<Int32>) -> () {
+// TODO-CHECK: bb0(%0 : $Optional<Int32>):
+// TODO-CHECK-NEXT: tuple
+// TODO-CHECK-NEXT: return
+sil [ossa] @identical_switch_enum_dests : $@convention(thin) (Optional<Int32>) -> () {
+bb0(%0 : $Optional<Int32>):
+  switch_enum %0 : $Optional<Int32>, case #Optional.none!enumelt: bb1, case #Optional.some!enumelt: bb2
+
+bb1:
+  br bb3
+
+bb2(%payload : $Int32):
+  br bb3
+
+bb3:
+  %r = tuple()
+  return %r : $()
+}
+
+@objc protocol ObjcProto { func foo() }
+
+// CHECK-LABEL: sil [ossa] @thread_objc_method_call_succ_block
+// TODO-CHECK: bb0
+// TODO-CHECK:  cond_br {{.*}}, bb1, bb2
+// TODO-CHECK: bb1
+// TODO-CHECK:  objc_method
+// TODO-CHECK:  apply
+// TODO-CHECK:  cond_br {{.*}}, bb3, bb4
+// TODO-CHECK: bb2
+// TODO-CHECK:  cond_br {{.*}}, bb3, bb4
+// TODO-CHECK: bb3
+// TODO-CHECK:  cond_fail
+// TODO-CHECK:  br bb4
+// TODO-CHECK: bb4:
+// TODO-CHECK:  return
+
+sil [ossa] @thread_objc_method_call_succ_block : $@convention(thin) <T where T : ObjcProto> (Builtin.Int1, @owned T, Builtin.Int1) -> () {
+bb0(%0: $Builtin.Int1, %1 : @owned $T, %2 : $Builtin.Int1):
+  %1a = copy_value %1 : $T
+  cond_br %0, bb1 , bb2a
+
+bb1:
+  %3 = objc_method %1a : $T, #ObjcProto.foo!foreign, $@convention(objc_method) <τ_0_0 where τ_0_0 : ObjcProto> (τ_0_0) -> ()
+  %4 = apply %3<T>(%1a) : $@convention(objc_method) <τ_0_0 where τ_0_0 : ObjcProto> (τ_0_0) -> ()
+  br bb2
+
+bb2a:
+  br bb2
+
+bb2:
+  destroy_value %1a : $T
+  cond_br %2, bb3, bb4a
+
+bb3:
+  cond_fail %0 : $Builtin.Int1
+  br bb4
+
+bb4a:
+  br bb4
+
+bb4:
+  destroy_value %1 : $T
+  %41 = tuple ()
+  return %41 : $()
+}
+
+// CHECK-LABEL: sil [ossa] @unpack_enum_arg_non_trivial_owned :
+// CHECK: bb1:
+// CHECK:   [[COPY1:%.*]] = copy_value %0
+// CHECK:   br bb3([[COPY1]] : $Klass)
+// CHECK: bb2:
+// CHECK:   [[COPY2:%.*]] = copy_value %1
+// CHECK:   br bb3([[COPY2]] : $Klass)
+// CHECK: bb3([[A:%[0-9]+]] : @owned $Klass):
+// CHECK:   return [[A]]
+sil [ossa] @unpack_enum_arg_non_trivial_owned : $@convention(thin) (@guaranteed Klass, @guaranteed Klass) -> @owned Klass {
+bb0(%0 : @guaranteed $Klass, %1 : @guaranteed $Klass):
+  cond_br undef, bb1, bb2
+
+bb1:
+  %0a = copy_value %0 : $Klass
+  %2 = enum $Optional<Klass>, #Optional.some!enumelt, %0a : $Klass
+  br bb3(%2 : $Optional<Klass>)
+
+bb2:
+  %1a = copy_value %1 : $Klass
+  %3 = enum $Optional<Klass>, #Optional.some!enumelt, %1a : $Klass
+  br bb3(%3 : $Optional<Klass>)
+
+bb3(%4 : @owned $Optional<Klass>):
+  %5 = unchecked_enum_data %4 : $Optional<Klass>, #Optional.some!enumelt
+  return %5 : $Klass
+}
+
+// CHECK-LABEL: sil [ossa] @unpack_enum_arg_non_trivial_guaranteed :
+// CHECK: bb1:
+// CHECK:   [[E1:%.*]] = enum $Optional<Klass>, #Optional.some!enumelt, %0 : $Klass
+// CHECK:   [[B1:%.*]] = begin_borrow [[E1]] : $Optional<Klass>
+// CHECK:   br bb3([[B1]] : $Optional<Klass>)
+// CHECK: bb2:
+// CHECK:   [[E2:%.*]] = enum $Optional<Klass>, #Optional.some!enumelt, %1 : $Klass
+// CHECK:   [[B2:%.*]] = begin_borrow [[E2]] : $Optional<Klass>
+// CHECK:   br bb3([[B2]] : $Optional<Klass>)
+sil [ossa] @unpack_enum_arg_non_trivial_guaranteed : $@convention(thin) (@guaranteed Klass, @guaranteed Klass) -> @owned Klass {
+bb0(%0 : @guaranteed $Klass, %1 : @guaranteed $Klass):
+  cond_br undef, bb1, bb2
+
+bb1:
+  %2 = enum $Optional<Klass>, #Optional.some!enumelt, %0 : $Klass
+  %2a = begin_borrow %2 : $Optional<Klass>
+  br bb3(%2a : $Optional<Klass>)
+
+bb2:
+  %3 = enum $Optional<Klass>, #Optional.some!enumelt, %1 : $Klass
+  %3a = begin_borrow %3 : $Optional<Klass>
+  br bb3(%3a : $Optional<Klass>)
+
+bb3(%4 : @guaranteed $Optional<Klass>):
+  %5 = unchecked_enum_data %4 : $Optional<Klass>, #Optional.some!enumelt
+  %5a = copy_value %5 : $Klass
+  end_borrow %4 : $Optional<Klass>
+  return %5a : $Klass
+}
+
+// CHECK-LABEL: sil [ossa] @unpack_enum_arg_non_trivial_guaranteed_load_borrow :
+// CHECK: bb0(%0 : $*Klass, %1 : $*Klass):
+// CHECK:   [[LD1:%.*]] = load_borrow %0 : $*Klass
+// CHECK:   [[LD2:%.*]] = load_borrow %1 : $*Klass                   
+// CHECK: bb1:
+// CHECK:   [[E1:%.*]] = enum $Optional<Klass>, #Optional.some!enumelt, [[LD1]] : $Klass
+// CHECK:   [[B1:%.*]] = begin_borrow [[E1]] : $Optional<Klass>
+// CHECK:   br bb3([[B1]] : $Optional<Klass>)
+// CHECK: bb2:
+// CHECK:   [[E2:%.*]] = enum $Optional<Klass>, #Optional.some!enumelt, [[LD2]] : $Klass
+// CHECK:   [[B2:%.*]] = begin_borrow [[E2]] : $Optional<Klass>
+// CHECK:   br bb3([[B2]] : $Optional<Klass>)
+sil [ossa] @unpack_enum_arg_non_trivial_guaranteed_load_borrow : $@convention(thin) (@in_guaranteed Klass, @in_guaranteed Klass) -> @owned Klass {
+bb0(%0 : $*Klass, %1 : $*Klass):
+  %0a = load_borrow %0 : $*Klass
+  %1a = load_borrow %1 : $*Klass
+  cond_br undef, bb1, bb2
+
+bb1:
+  %2 = enum $Optional<Klass>, #Optional.some!enumelt, %0a : $Klass
+  %2a = begin_borrow %2 : $Optional<Klass>
+  br bb3(%2a : $Optional<Klass>)
+
+bb2:
+  %3 = enum $Optional<Klass>, #Optional.some!enumelt, %1a : $Klass
+  %3a = begin_borrow %3 : $Optional<Klass>
+  br bb3(%3a : $Optional<Klass>)
+
+bb3(%4 : @guaranteed $Optional<Klass>):
+  %5 = unchecked_enum_data %4 : $Optional<Klass>, #Optional.some!enumelt
+  %5a = copy_value %5 : $Klass
+  end_borrow %4 : $Optional<Klass>
+  end_borrow %1a : $Klass
+  end_borrow %0a : $Klass
+  return %5a : $Klass
+}

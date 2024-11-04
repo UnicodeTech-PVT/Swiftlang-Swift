@@ -1,0 +1,38 @@
+RUN: %remote-run -n --remote-dir /xyz-REMOTE -i spiderman --output-prefix %/t some_user@some_host:12345 cp %/t/nested/input %/t/nested/output 2>&1 >/dev/null | %FileCheck %s
+
+CHECK: /usr/bin/ssh -n
+CHECK-DAG: -p 12345
+CHECK-DAG: -i spiderman
+CHECK-SAME: some_user@some_host -- '/usr/bin/env' '/bin/rm' '-rf' '{{.+}}-REMOTE/output'
+
+CHECK-NEXT: /usr/bin/ssh -n
+CHECK-DAG: -p 12345
+CHECK-DAG: -i spiderman
+CHECK-SAME: some_user@some_host -- '/usr/bin/env' '/bin/mkdir' '-p' '{{.+}}'
+
+CHECK: /usr/bin/ssh -n
+CHECK-DAG: -p 12345
+CHECK-DAG: -i spiderman
+CHECK-SAME: some_user@some_host -- '/usr/bin/env' {{.*}}'cp'
+
+CHECK-NEXT: {{^}}/bin/mkdir -p {{.+}}
+
+CHECK-NEXT: /usr/bin/rsync
+CHECK-DAG: '-p' '12345'
+CHECK-DAG: '-i' 'spiderman'
+CHECK-SAME: some_user@some_host
+
+# Make sure things work without a port.
+RUN: %remote-run -n --remote-dir /xyz-REMOTE -i spiderman --output-prefix %/t some_user@some_host cp %/t/nested/input %/t/nested/output 2>&1 >/dev/null | %FileCheck -check-prefix CHECK-PORTLESS %s
+
+CHECK-PORTLESS: /usr/bin/ssh -n
+CHECK-PORTLESS-SAME: -i spiderman
+CHECK-PORTLESS-SAME: some_user@some_host -- '/usr/bin/env' '/bin/rm' '-rf' '{{.+}}'
+
+CHECK-PORTLESS: /usr/bin/ssh -n
+CHECK-PORTLESS-SAME: -i spiderman
+CHECK-PORTLESS-SAME: some_user@some_host -- '/usr/bin/env' '/bin/mkdir' '-p' '{{.+}}'
+
+CHECK-PORTLESS: /usr/bin/ssh -n
+CHECK-PORTLESS-SAME: -i spiderman
+CHECK-PORTLESS-SAME: some_user@some_host -- '/usr/bin/env' {{.*}}'cp'

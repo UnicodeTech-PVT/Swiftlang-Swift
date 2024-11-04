@@ -1,0 +1,153 @@
+// RUN: %target-swift-frontend -stack-promotion-limit 48 -Onone -emit-ir %s | %FileCheck %s -DINT=i%target-ptrsize
+
+// REQUIRES: swift_in_compiler
+
+import Builtin
+import Swift
+
+class TestClass {
+  @_hasStorage var a : Int64
+  init()
+}
+
+struct TestStruct {
+  @_hasStorage var a : Int64
+  @_hasStorage var b : Int64
+  @_hasStorage var c : Int64
+}
+
+class BigClass {
+  @_hasStorage var a : Int64
+  @_hasStorage var b : Int64
+  @_hasStorage var c : Int64
+  @_hasStorage var d : Int64
+  @_hasStorage var e : Int64
+  @_hasStorage var f : Int64
+  @_hasStorage var g : Int64
+  init()
+}
+
+sil_vtable TestClass {}
+sil_vtable BigClass {}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @simple_promote
+// CHECK: %reference.raw = alloca %[[C:[a-zA-Z0-9_]+]], align 8
+// CHECK-NEXT: [[MR:%[0-9]+]] = call swiftcc %swift.metadata_response @"$s17class_stack_alloc9TestClassCMa"([[INT]] 0)
+// CHECK-NEXT: [[M:%.*]] = extractvalue %swift.metadata_response [[MR]], 0
+// CHECK-NEXT: %reference.new = call ptr @swift_initStackObject(ptr [[M]], ptr %reference.raw)
+// CHECK-NEXT: call {{.*}} @swift_release(ptr %reference.new)
+// CHECK-NEXT: call void @llvm.lifetime.end.p0(i64 -1, ptr %reference.new)
+// CHECK-NEXT: ret void
+sil @simple_promote : $@convention(thin) () -> () {
+bb0:
+  %o1 = alloc_ref [stack] $TestClass
+  strong_release %o1 : $TestClass
+  dealloc_stack_ref %o1 : $TestClass
+
+  %r = tuple()
+  return %r : $()
+}
+
+// A stack promotion limit of 48 bytes allows that one of the two alloc_refs
+// can be allocated on the stack.
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @exceed_limit
+// CHECK: alloca {{.*}}TestClass
+// CHECK: alloca {{.*}}TestStruct
+// CHECK-NOT: alloca
+// CHECK: call ptr @swift_initStackObject
+// CHECK: call noalias ptr @swift_allocObject
+// CHECK: ret void
+sil @exceed_limit : $@convention(thin) () -> () {
+bb0:
+  %o1 = alloc_ref [stack] $TestClass
+  %o2 = alloc_ref [stack] $TestClass
+
+  %s1 = alloc_stack $TestStruct
+
+  %f = function_ref @unknown_func :  $@convention(thin) (@inout TestStruct) -> ()
+  %a = apply %f(%s1) : $@convention(thin) (@inout TestStruct) -> ()
+
+  dealloc_stack %s1 : $*TestStruct
+
+  strong_release %o1 : $TestClass
+  strong_release %o2 : $TestClass
+  dealloc_stack_ref %o2 : $TestClass
+  dealloc_stack_ref %o1 : $TestClass
+
+  %r = tuple()
+  return %r : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @promoted_with_devirtualized_release
+// CHECK: %reference.raw = alloca %[[C:[a-zA-Z0-9_]+]], align 8
+// CHECK-NEXT: [[MR:%[0-9]+]] = call swiftcc %swift.metadata_response @"$s17class_stack_alloc9TestClassCMa"([[INT]] 0)
+// CHECK-NEXT: [[M:%.*]] = extractvalue %swift.metadata_response [[MR]], 0
+// CHECK-NEXT: %reference.new = call ptr @swift_initStackObject(ptr [[M]], ptr %reference.raw)
+// CHECK-NEXT: call {{.*}} @swift_setDeallocating(ptr %reference.new)
+// CHECK-NEXT: call swiftcc void @not_inlined_destructor(ptr %reference.new)
+// CHECK-NEXT: call void @llvm.lifetime.end.p0(i64 -1, ptr %reference.new)
+// CHECK-NEXT: ret void
+sil @promoted_with_devirtualized_release : $@convention(thin) () -> () {
+bb0:
+  %o1 = alloc_ref [stack] $TestClass
+  %d = begin_dealloc_ref %o1 : $TestClass of %o1 : $TestClass
+  %f = function_ref @not_inlined_destructor :  $@convention(thin) (TestClass) -> ()
+  %a = apply %f(%d) : $@convention(thin) (TestClass) -> ()
+  dealloc_stack_ref %o1 : $TestClass
+
+  %r = tuple()
+  return %r : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @bare_alloc_ref
+// CHECK:         %reference.raw = alloca %[[C:[a-zA-Z0-9_]+]], align 8
+// CHECK-NEXT:    call void @llvm.lifetime.end.p0(i64 -1, ptr %reference.raw)
+// CHECK-NEXT:    ret void
+sil @bare_alloc_ref : $@convention(thin) () -> () {
+bb0:
+  %o1 = alloc_ref [bare] [stack] $TestClass
+  %d = begin_dealloc_ref %o1 : $TestClass of %o1 : $TestClass
+  dealloc_stack_ref %o1 : $TestClass
+  %r = tuple()
+  return %r : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @promoted_with_inlined_devirtualized_release
+// CHECK: %reference.raw = alloca %[[C:[a-zA-Z0-9_]+]], align 8
+// CHECK-NEXT: [[MR:%[0-9]+]] = call swiftcc %swift.metadata_response @"$s17class_stack_alloc9TestClassCMa"([[INT]] 0)
+// CHECK-NEXT: [[M:%.*]] = extractvalue %swift.metadata_response [[MR]], 0
+// CHECK-NEXT: %reference.new = call ptr @swift_initStackObject(ptr [[M]], ptr %reference.raw)
+// CHECK-NOT: call
+// CHECK: call void @llvm.lifetime.end.p0(i64 -1, ptr %reference.new)
+// CHECK-NEXT: ret void
+sil @promoted_with_inlined_devirtualized_release : $@convention(thin) () -> () {
+bb0:
+  %o1 = alloc_ref [stack] $TestClass
+  %d = begin_dealloc_ref %o1 : $TestClass of %o1 : $TestClass
+  dealloc_ref %d : $TestClass
+  dealloc_stack_ref %o1 : $TestClass
+
+  %r = tuple()
+  return %r : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @not_promoted_with_inlined_devirtualized_release
+// CHECK: [[O:%[0-9]+]] = call {{.*}} @swift_allocObject
+// CHECK-NEXT: call {{.*}} @swift_setDeallocating(ptr [[O]])
+// CHECK-NEXT: call void @swift_deallocClassInstance(ptr [[O]], {{.*}})
+// CHECK-NEXT: ret void
+sil @not_promoted_with_inlined_devirtualized_release : $@convention(thin) () -> () {
+bb0:
+  %o1 = alloc_ref [stack] $BigClass
+  %d = begin_dealloc_ref %o1 : $BigClass of %o1 : $BigClass
+  dealloc_ref %d : $BigClass
+  dealloc_stack_ref %o1 : $BigClass
+
+  %r = tuple()
+  return %r : $()
+}
+
+sil @not_inlined_destructor :  $@convention(thin) (TestClass) -> ()
+sil @unknown_func :  $@convention(thin) (@inout TestStruct) -> ()
+

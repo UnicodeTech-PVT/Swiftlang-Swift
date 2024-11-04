@@ -1,0 +1,17 @@
+// Ensure that IRGen don't emit unreachable after coro.end.async for targets that don't support musttail call.
+// RUN: %swift -target wasm32-unknown-none -parse-stdlib %s -module-name main -emit-irgen -o - | %FileCheck %s
+
+// REQUIRES: concurrency, CODEGENERATOR=WebAssembly
+
+sil_stage canonical
+
+import Builtin
+
+sil @test_simple : $@async () -> () {
+bb0:
+  %0 = tuple ()
+  return %0 : $()
+// CHECK:     call i1 (ptr, i1, ...) @llvm.coro.end.async
+// CHECK-NOT: unreachable
+// CHECK:     ret void
+}

@@ -1,0 +1,160 @@
+// RUN: %target-swift-frontend -disable-type-layout %s -emit-ir | %FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-%target-runtime  --check-prefix=CHECK-%target-runtime-simulator-%target-is-simulator
+
+// REQUIRES: CPU=x86_64
+
+import Builtin
+
+// Enums consisting of a retainable pointer and a single empty case use nullable
+// pointer value semantics.
+enum NullableRefcounted {
+  case Ref(Builtin.NativeObject)
+  case None
+}
+
+// CHECK-LABEL: define internal void @"$s34enum_value_semantics_special_cases18NullableRefcountedOwxx"(ptr noalias %object, ptr %NullableRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %object, align 8
+// CHECK:   call void @swift_release(ptr %0)
+// CHECK:   ret void
+// CHECK: }
+
+// CHECK-LABEL: define internal ptr @"$s34enum_value_semantics_special_cases18NullableRefcountedOwcp"(ptr noalias %dest, ptr noalias %src, ptr %NullableRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %src, align 8
+// CHECK:   %1 = call ptr @swift_retain(ptr returned %0)
+// CHECK:   store ptr %0, ptr %dest, align 8
+// CHECK:   ret ptr %dest
+// CHECK: }
+
+// CHECK-LABEL: define internal ptr @"$s34enum_value_semantics_special_cases18NullableRefcountedOwca"(ptr %dest, ptr %src, ptr %NullableRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %dest, align 8
+// CHECK:   %1 = load ptr, ptr %src, align 8
+// CHECK:   %2 = call ptr @swift_retain(ptr returned %1)
+// CHECK:   store ptr %1, ptr %dest, align 8
+// CHECK:   call void @swift_release(ptr %0)
+// CHECK:   ret ptr %dest
+// CHECK: }
+
+// CHECK-LABEL: define internal ptr @"$s34enum_value_semantics_special_cases18NullableRefcountedOwta"(ptr noalias %dest, ptr noalias %src, ptr %NullableRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %dest, align 8
+// CHECK:   %1 = load ptr, ptr %src, align 8
+// CHECK:   store ptr %1, ptr %dest, align 8
+// CHECK:   call void @swift_release(ptr %0)
+// CHECK:   ret ptr %dest
+// CHECK: }
+
+// Enums consisting of a retainable block pointer and a single empty case use
+// nullable block pointer value semantics.
+enum NullableBlockRefcounted {
+  case Ref(@convention(block) () -> ())
+  case None
+}
+
+// CHECK-LABEL: define internal void @"$s34enum_value_semantics_special_cases23NullableBlockRefcountedOwxx"(ptr noalias %object, ptr %NullableBlockRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %object, align 8
+// CHECK:   call void @_Block_release(ptr %0)
+// CHECK:   ret void
+// CHECK: }
+
+// CHECK-LABEL: define internal ptr @"$s34enum_value_semantics_special_cases23NullableBlockRefcountedOwcp"(ptr noalias %dest, ptr noalias %src, ptr %NullableBlockRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %src, align 8
+// CHECK:   %1 = call ptr @_Block_copy(ptr %0)
+// CHECK:   store ptr %0, ptr %dest, align 8
+// CHECK:   ret ptr %dest
+// CHECK: }
+
+// CHECK-LABEL: define internal ptr @"$s34enum_value_semantics_special_cases23NullableBlockRefcountedOwca"(ptr %dest, ptr %src, ptr %NullableBlockRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %dest, align 8
+// CHECK:   %1 = load ptr, ptr %src, align 8
+// CHECK:   %2 = call ptr @_Block_copy(ptr %1)
+// CHECK:   store ptr %1, ptr %dest, align 8
+// CHECK:   call void @_Block_release(ptr %0)
+// CHECK:   ret ptr %dest
+// CHECK: }
+
+// CHECK-LABEL: define internal ptr @"$s34enum_value_semantics_special_cases23NullableBlockRefcountedOwta"(ptr noalias %dest, ptr noalias %src, ptr %NullableBlockRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %dest, align 8
+// CHECK:   %1 = load ptr, ptr %src, align 8
+// CHECK:   store ptr %1, ptr %dest, align 8
+// CHECK:   call void @_Block_release(ptr %0)
+// CHECK:   ret ptr %dest
+// CHECK: }
+
+// With multiple empty cases, the nullable pointer semantics aren't used.
+enum MultipleEmptyRefcounted {
+  case Ref(Builtin.NativeObject)
+  case A
+  case B
+}
+
+// CHECK-LABEL: define internal void @"$s34enum_value_semantics_special_cases23MultipleEmptyRefcountedOwxx"(ptr noalias %object, ptr %MultipleEmptyRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load i64, ptr %object, align 8
+// CHECK:   switch i64 %0, label %1 [
+// CHECK:     i64 0, label %2
+// CHECK-native:   i64 1, label %2
+// CHECK-objc-simulator-false:     i64 2, label %2
+// CHECK-objc-simulator-true:     i64 1, label %2
+// CHECK:   ]
+// CHECK: 1:                                      ; preds = %entry
+// CHECK:   %toDestroy = load ptr, ptr %object, align 8
+// CHECK:   call void @swift_release(ptr %toDestroy)
+// CHECK:   br label %2
+// CHECK: 2:                                      ; preds = %1, %entry, %entry
+// CHECK:   ret void
+// CHECK: }
+
+// Enums consisting of all retainable pointers and at most one empty case
+// use tagged pointer value semantics—we mask off the tag bits and pass the
+// pointer to the r/r functions.
+
+class C {}
+sil_vtable C {}
+class D {}
+sil_vtable D {}
+
+sil @$s34enum_value_semantics_special_cases1CCfD : $@convention(method) (C) -> ()
+sil @$s34enum_value_semantics_special_cases1DCfD : $@convention(method) (D) -> ()
+
+enum AllRefcounted {
+  case Ref(Builtin.NativeObject)
+  case CRef(C)
+  case DRef(D)
+  case None
+}
+
+// CHECK-LABEL: define internal void @"$s34enum_value_semantics_special_cases13AllRefcountedOwxx"(ptr noalias %object, ptr %AllRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load i64, ptr %object, align 8
+// --                        0x3fffffffffffffff
+// CHECK:   %1 = and i64 %0, 4611686018427387903
+// CHECK:   %2 = inttoptr i64 %1 to ptr
+// CHECK:   call void @swift_release(ptr %2)
+// CHECK:   ret void
+// CHECK: }
+
+// CHECK-LABEL: define internal ptr @"$s34enum_value_semantics_special_cases13AllRefcountedOwcp"(ptr noalias %dest, ptr noalias %src, ptr %AllRefcounted)
+// --                              0x3fffffffffffffff
+// CHECK:         %1 = and i64 %0, 4611686018427387903
+// CHECK:         %2 = inttoptr i64 %1 to ptr
+// CHECK:         call ptr @swift_retain(ptr returned %2)
+// -- NB: The original loaded value is stored, not the masked one.
+// CHECK:         store i64 %0, ptr %dest, align 8
+// CHECK: }
+
+enum AllRefcountedTwoSimple {
+  case Ref(Builtin.NativeObject)
+  case CRef(C)
+  case DRef(D)
+  case None
+  case Nothing
+}
+
+// CHECK-LABEL: define internal void @"$s34enum_value_semantics_special_cases22AllRefcountedTwoSimpleOwxx"
+// CHECK:   call void @"$s34enum_value_semantics_special_cases22AllRefcountedTwoSimpleOWOy"

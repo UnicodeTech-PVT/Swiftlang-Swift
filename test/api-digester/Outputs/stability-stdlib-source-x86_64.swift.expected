@@ -1,0 +1,5 @@
+#include "stability-stdlib-source-base.swift.expected"
+
+// NOTE: Most differences from the baseline are common across all architectures
+// should go into stability-stdlib-source-base.swift.expected. Only capture
+// x86_64-specific differences from the baseline here.

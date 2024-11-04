@@ -1,0 +1,160 @@
+// RUN: %target-swift-frontend -enable-objc-interop  %s -emit-ir | %FileCheck --check-prefixes=CHECK,CHECK-objc %s
+// RUN: %target-swift-frontend -disable-objc-interop %s -emit-ir | %FileCheck --check-prefixes=CHECK,CHECK-native %s
+
+// REQUIRES: CPU=x86_64
+
+sil_stage canonical
+
+protocol P {
+  func concrete_method()
+  static func concrete_static_method()
+  func generic_method<Z>(x: Z)
+}
+
+struct Foo: P {
+  func concrete_method()
+  static func concrete_static_method()
+  func generic_method<Z>(x: Z)
+}
+class Bar<T, U, V>: P {
+  func concrete_method()
+  static func concrete_static_method()
+  func generic_method<Z>(x: Z)
+}
+sil_vtable Bar {}
+sil @$s19sil_witness_methods3BarCfD : $@convention(method) <T, U, V> (Bar<T, U, V>) -> ()
+
+struct X {}
+struct Y {}
+struct Z {}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @concrete_type_concrete_method_witness(ptr noalias nocapture swiftself %0, ptr %Self, ptr %SelfWitnessTable)
+sil @concrete_type_concrete_method_witness : $@convention(witness_method: P) (@in Foo) -> @thick Foo.Type {
+entry(%x : $*Foo):
+  %m = metatype $@thick Foo.Type
+  return %m : $@thick Foo.Type
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @generic_type_concrete_method_witness(ptr noalias nocapture swiftself dereferenceable({{.*}}) %0, ptr %Self, ptr %SelfWitnessTable)
+// CHECK-objc:    [[T1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 10
+// CHECK-native:  [[T1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 7
+// CHECK:         %T = load ptr, ptr [[T1]], align 8
+// CHECK-objc:    [[U1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 11
+// CHECK-native:  [[U1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 8
+// CHECK:         %U = load ptr, ptr [[U1]], align 8
+// CHECK-objc:    [[V1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 12
+// CHECK-native:  [[V1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 9
+// CHECK:         %V = load ptr, ptr [[V1]], align 8
+sil @generic_type_concrete_method_witness : $@convention(witness_method: P) <T, U, V> (@in Bar<T, U, V>) -> @thick Bar<T, U, V>.Type {
+entry(%x : $*Bar<T, U, V>):
+  %t = metatype $@thick T.Type
+  %u = metatype $@thick U.Type
+  %v = metatype $@thick V.Type
+  %m = metatype $@thick Bar<T, U, V>.Type
+
+  return %m : $@thick Bar<T, U, V>.Type
+}
+
+// TODO: %Self Type arg is redundant for static method witness
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @concrete_type_concrete_static_method_witness(ptr swiftself %0, ptr %Self, ptr %SelfWitnessTable)
+sil @concrete_type_concrete_static_method_witness : $@convention(witness_method: P) (@thick Foo.Type) -> @thick Foo.Type {
+entry(%x : $@thick Foo.Type):
+  %m = metatype $@thick Foo.Type
+  return %m : $@thick Foo.Type
+}
+
+//   The use of %0 or %Self here is irrelevant.
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @generic_type_concrete_static_method_witness(ptr swiftself %0, ptr %Self, ptr %SelfWitnessTable)
+// CHECK-objc:    [[T1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 10
+// CHECK-native:  [[T1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 7
+// CHECK:         %T = load ptr, ptr [[T1]], align 8
+// CHECK-objc:    [[U1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 11
+// CHECK-native:  [[U1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 8
+// CHECK:         %U = load ptr, ptr [[U1]], align 8
+// CHECK-objc:    [[V1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 12
+// CHECK-native:  [[V1:%.*]] = getelementptr inbounds ptr, ptr %Self, i64 9
+// CHECK:         %V = load ptr, ptr [[V1]], align 8
+sil @generic_type_concrete_static_method_witness : $@convention(witness_method: P) <T, U, V> (@thick Bar<T, U, V>.Type) -> @thick Bar<T, U, V>.Type {
+entry(%x : $@thick Bar<T, U, V>.Type):
+  %t = metatype $@thick T.Type
+  %u = metatype $@thick U.Type
+  %v = metatype $@thick V.Type
+  %m = metatype $@thick Bar<T, U, V>.Type
+
+  return %m : $@thick Bar<T, U, V>.Type
+}
+
+// TODO: %Self Type arg is redundant for class method witness
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @concrete_type_generic_method_witness(ptr noalias %0, ptr %Z, ptr noalias nocapture swiftself %1, ptr %Self, ptr %SelfWitnessTable)
+sil @concrete_type_generic_method_witness : $@convention(witness_method: P) <Z> (@in Z, @in Foo) -> @thick Foo.Type {
+entry(%z : $*Z, %x : $*Foo):
+  %m = metatype $@thick Foo.Type
+  return %m : $@thick Foo.Type
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @generic_type_generic_method_witness(ptr noalias %0, ptr %Z, ptr noalias nocapture swiftself dereferenceable(8) %1, ptr %Self, ptr %SelfWitnessTable)
+sil @generic_type_generic_method_witness : $@convention(witness_method: P) <T, U, V, Z> (@in Z, @in Bar<T, U, V>) -> @thick Bar<T, U, V>.Type {
+entry(%z : $*Z, %x : $*Bar<T, U, V>):
+  %t = metatype $@thick T.Type
+  %u = metatype $@thick U.Type
+  %v = metatype $@thick V.Type
+  %m = metatype $@thick Bar<T, U, V>.Type
+
+  return %m : $@thick Bar<T, U, V>.Type
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @concrete_type_generic_static_method_witness(ptr noalias %0, ptr %Z, ptr swiftself %1, ptr %Self, ptr %SelfWitnessTable)
+sil @concrete_type_generic_static_method_witness : $@convention(witness_method: P) <Z> (@in Z, @thick Foo.Type) -> @thick Foo.Type {
+entry(%z : $*Z, %x : $@thick Foo.Type):
+  %m = metatype $@thick Foo.Type
+  return %m : $@thick Foo.Type
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @generic_type_generic_static_method_witness(ptr noalias %0, ptr %Z, ptr swiftself %1, ptr %Self, ptr %SelfWitnessTable)
+sil @generic_type_generic_static_method_witness : $@convention(witness_method: P) <T, U, V, Z> (@in Z, @thick Bar<T, U, V>.Type) -> @thick Bar<T, U, V>.Type {
+entry(%z : $*Z, %x : $@thick Bar<T, U, V>.Type):
+  %t = metatype $@thick T.Type
+  %u = metatype $@thick U.Type
+  %v = metatype $@thick V.Type
+  %m = metatype $@thick Bar<T, U, V>.Type
+
+  return %m : $@thick Bar<T, U, V>.Type
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @call_concrete_witness() {{.*}} {
+// CHECK:         call swiftcc ptr @concrete_type_concrete_method_witness(ptr {{.*}}, ptr {{.*}} @"$s19sil_witness_methods3FooVMf", {{.*}})
+sil @call_concrete_witness : $(Foo) -> () {
+entry(%x : $Foo):
+  %m = alloc_stack $Foo
+  store %x to %m : $*Foo
+  %w = function_ref @concrete_type_concrete_method_witness : $@convention(witness_method: P) (@in Foo) -> @thick Foo.Type
+  %z = apply %w(%m) : $@convention(witness_method: P) (@in Foo) -> @thick Foo.Type
+  dealloc_stack %m : $*Foo
+  return undef : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @call_concrete_static_witness() {{.*}} {
+// CHECK:         call swiftcc ptr @concrete_type_concrete_static_method_witness(ptr {{.*}} @"$s19sil_witness_methods3FooVMf", {{.*}} ptr {{.*}} @"$s19sil_witness_methods3FooVMf", {{.*}})
+sil @call_concrete_static_witness : $() -> () {
+entry:
+  %m = metatype $@thick Foo.Type
+  %w = function_ref @concrete_type_concrete_static_method_witness : $@convention(witness_method: P) (@thick Foo.Type) -> @thick Foo.Type
+  %z = apply %w(%m) : $@convention(witness_method: P) (@thick Foo.Type) -> @thick Foo.Type
+  return undef : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @partial_apply_concrete_witness() {{.*}} {
+// CHECK:         [[CONTEXT:%.*]] = call noalias ptr @swift_allocObject({{.*}})
+// CHECK:         [[WTABLE:%.*]] = getelementptr inbounds <{ %swift.refcounted, ptr }>, ptr [[CONTEXT]], i32 0, i32 1
+// CHECK:         store ptr @"$s19sil_witness_methods3BarCyxq_q0_GAA1PAAWP", ptr [[WTABLE]]
+// CHECK:         [[RESULT:%.*]] = insertvalue { ptr, ptr } { ptr @"$s36generic_type_concrete_method_witnessTA", ptr undef }, ptr [[CONTEXT]], 1
+// CHECK:         ret { ptr, ptr } [[RESULT]]
+
+sil @partial_apply_concrete_witness : $() -> @callee_owned (@in Bar<Foo, Foo, Foo>) -> @thick Bar<Foo, Foo, Foo>.Type {
+entry:
+  %w = function_ref @generic_type_concrete_method_witness : $@convention(witness_method: P) <T, U, V> (@in Bar<T, U, V>) -> @thick Bar<T, U, V>.Type
+  %z = partial_apply %w<Foo, Foo, Foo>() : $@convention(witness_method: P) <T, U, V> (@in Bar<T, U, V>) -> @thick Bar<T, U, V>.Type
+  return %z : $@callee_owned (@in Bar<Foo, Foo, Foo>) -> @thick Bar<Foo, Foo, Foo>.Type
+}

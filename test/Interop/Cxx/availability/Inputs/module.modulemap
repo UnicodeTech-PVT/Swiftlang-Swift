@@ -1,0 +1,4 @@
+module SomeModule {
+  requires objc
+  header "SomeModule.h"
+}

@@ -1,0 +1,312 @@
+// RUN: %target-swift-frontend -Xllvm -sil-disable-pass=simplification -enable-objc-interop  -primary-file %s -emit-ir | %FileCheck %s -DINT=i%target-ptrsize --check-prefixes=CHECK,CHECK-objc
+// RUN: %target-swift-frontend -Xllvm -sil-disable-pass=simplification -disable-objc-interop -primary-file %s -emit-ir | %FileCheck %s -DINT=i%target-ptrsize --check-prefixes=CHECK,CHECK-native
+// REQUIRES: objc_codegen
+sil_stage canonical
+
+import Builtin
+
+public protocol P {}
+public class C : P {}
+public class D<T : P> {}
+class E {}
+
+public protocol Observable {
+  associatedtype Result
+  func subscribe<T: Observer>(o: T) -> ()
+}
+
+public protocol Observer {
+  associatedtype Result
+}
+
+sil hidden @witness_method : $@convention(thin) <S where S : Observable><O where O : Observer, S.Result == O.Result> (@in S) -> @owned @callee_owned (@in O) -> () {
+bb0(%0 : $*S):
+  %1 = witness_method $S, #Observable.subscribe : $@convention(witness_method: Observable) <τ_0_0 where τ_0_0 : Observable><τ_1_0 where τ_1_0 : Observer, τ_0_0.Result == τ_1_0.Result> (@in τ_1_0, @in_guaranteed τ_0_0) -> ()
+  %2 = partial_apply %1<S, O>(%0) : $@convention(witness_method: Observable) <τ_0_0 where τ_0_0 : Observable><τ_1_0 where τ_1_0 : Observer, τ_0_0.Result == τ_1_0.Result> (@in τ_1_0, @in_guaranteed τ_0_0) -> ()
+  return %2 : $@callee_owned (@in O) -> ()
+}
+
+// CHECK-LABEL: define internal swiftcc ptr @"$s23unspecialized_uncurriedTA"(ptr
+// CHECK: [[TMP:%.*]] = call swiftcc %swift.metadata_response @"$s23partial_apply_forwarder1CCMa"([[INT]] 0)
+// CHECK: [[TYPE:%.*]] = extractvalue %swift.metadata_response [[TMP]], 0
+// CHECK: [[CALL:%.*]] = call swiftcc ptr @unspecialized_uncurried(ptr [[TYPE]], ptr @"$s23partial_apply_forwarder1CCAA1PAAWP", ptr swiftself %0)
+
+sil hidden @specialized_curried : $@convention(thin) (@owned E) -> @owned @callee_owned () -> @owned D<C> {
+bb0(%0 : $E):
+  %1 = function_ref @unspecialized_uncurried : $@convention(method) <τ_0_0 where τ_0_0 : P> (@guaranteed E) -> @owned D<τ_0_0>
+  %2 = partial_apply %1<C>(%0) : $@convention(method) <τ_0_0 where τ_0_0 : P> (@guaranteed E) -> @owned D<τ_0_0>
+  return %2 : $@callee_owned () -> @owned D<C>
+}
+
+sil hidden_external @unspecialized_uncurried : $@convention(method) <τ_0_0 where τ_0_0 : P> (@guaranteed E) -> @owned D<τ_0_0>
+
+
+// CHECK-LABEL: define internal swiftcc void @"$s7takingPTA"(ptr
+// CHECK: [[CONTEXT:%.*]] = alloca ptr
+// CHECK: [[TMP:%.*]] = call swiftcc %swift.metadata_response @"$s23partial_apply_forwarder1CCMa"([[INT]] 0)
+// CHECK: [[TYPE:%.*]] = extractvalue %swift.metadata_response [[TMP]], 0
+// CHECK: store ptr %0, ptr [[CONTEXT]]
+// CHECK:  call swiftcc void @takingP(ptr [[TYPE]], ptr{{.*}}$s23partial_apply_forwarder1CCAA1PAAWP{{.*}}, ptr {{.*}} swiftself [[CONTEXT]]
+// CHECK:  ret
+sil hidden_external @takingP : $@convention(method) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> ()
+
+sil hidden @reabstract_context : $@convention(thin) (@owned C) -> () {
+bb0(%0 : $C):
+  %6 = alloc_stack $C
+  store %0 to %6 : $*C
+  %8 = function_ref @takingP : $@convention(method) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> ()
+  %9 = partial_apply %8<C>(%6) : $@convention(method) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> ()
+  dealloc_stack %6 : $*C
+  strong_release %9 : $@callee_owned() -> ()
+  %10 = tuple ()
+  return %10 : $()
+}
+
+public protocol Q {
+  associatedtype Update
+}
+
+public struct BaseProducer<T> : Q {
+  public typealias Update = T
+}
+
+public class WeakBox<T> {}
+
+public struct EmptyType {}
+
+sil hidden_external @takingQ : $@convention(thin) <τ_0_0 where  τ_0_0 : Q> (@owned WeakBox<τ_0_0>) -> ()
+sil hidden_external @takingQAndEmpty : $@convention(thin) <τ_0_0 where  τ_0_0 : Q> (@owned WeakBox<τ_0_0>, EmptyType) -> ()
+sil hidden_external @takingEmptyAndQ : $@convention(thin) <τ_0_0 where  τ_0_0 : Q> (EmptyType, @owned WeakBox<τ_0_0>) -> ()
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @bind_polymorphic_param_from_context(ptr noalias %0, ptr %"\CF\84_0_1")
+// CHECK: entry:
+// CHECK:   [[TMP:%.*]] = call swiftcc %swift.metadata_response @"$s23partial_apply_forwarder12BaseProducerVMa"([[INT]] 255, ptr %"\CF\84_0_1")
+// CHECK:   [[BPTYPE:%.*]] = extractvalue %swift.metadata_response [[TMP]], 0
+// CHECK:   [[TMP:%.*]] = call swiftcc %swift.metadata_response @"$s23partial_apply_forwarder7WeakBoxCMa"([[INT]] 0, ptr [[BPTYPE]])
+// CHECK:   [[WEAKBOXTYPE:%.*]] = extractvalue %swift.metadata_response [[TMP]], 0
+// CHECK:   [[OBJ:%.*]] = call noalias ptr @swift_allocObject(ptr [[WEAKBOXTYPE]]
+// CHECK:   [[CTX:%.*]] = call noalias ptr @swift_allocObject(
+// CHECK:   [[WITNESS:%.*]] = call ptr @swift_getWitnessTable(
+// CHECK:   [[CLOSURE:%.*]] = insertvalue { ptr, ptr } { ptr @"$s7takingQTA{{(\.ptrauth)?}}", ptr undef }, ptr [[CTX]], 1
+// CHECK:   ret { ptr, ptr } [[CLOSURE]]
+
+// CHECK-LABEL: define internal swiftcc void @"$s7takingQTA"(ptr swiftself %0)
+// CHECK: entry:
+// CHECK:   [[WITNESS:%.*]] = load ptr, ptr [[WITNESSADDR:%.*]]
+// CHECK:   [[OBJPTR:%.*]] = load ptr, ptr {{%.*}}
+// CHECK:   tail call swiftcc void @takingQ(ptr [[OBJPTR]], ptr [[WITNESS:%.*]])
+// CHECK: }
+
+sil public @bind_polymorphic_param_from_context : $@convention(thin) <τ_0_1>(@in τ_0_1) -> @owned @callee_owned () -> () {
+bb0(%0 : $*τ_0_1):
+  %1 = alloc_ref $WeakBox<BaseProducer<τ_0_1>>
+  %8 = function_ref @takingQ : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (@owned WeakBox<τ_0_0>) -> ()
+  %9 = partial_apply %8<BaseProducer<τ_0_1>>(%1) : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (@owned WeakBox<τ_0_0>) -> ()
+  return %9 : $@callee_owned () -> ()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @bind_polymorphic_param_from_context_2(ptr noalias %0, ptr %"\CF\84_0_1")
+// CHECK:   [[OBJ:%.*]] = call {{.*}} @swift_allocObject
+// CHECK:   [[REF:%.*]] = call {{.*}} @swift_allocObject
+// CHECK:   [[CLOSURE:%.*]] = insertvalue { ptr, ptr } { ptr @"$s15takingQAndEmptyTA{{(\.ptrauth)?}}", ptr undef }, ptr [[REF]], 1
+// CHECK: }
+sil public @bind_polymorphic_param_from_context_2 : $@convention(thin) <τ_0_1>(@in τ_0_1, EmptyType) -> @owned @callee_owned () -> () {
+bb0(%0 : $*τ_0_1, %2: $EmptyType):
+  %1 = alloc_ref $WeakBox<BaseProducer<τ_0_1>>
+  %8 = function_ref @takingQAndEmpty : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (@owned WeakBox<τ_0_0>, EmptyType) -> ()
+  %9 = partial_apply %8<BaseProducer<τ_0_1>>(%1, %2) : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (@owned WeakBox<τ_0_0>, EmptyType) -> ()
+  return %9 : $@callee_owned () -> ()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @bind_polymorphic_param_from_context_3(ptr noalias %0, ptr %"\CF\84_0_1")
+// CHECK:   [[OBJ:%.*]] = call {{.*}} @swift_allocObject
+// CHECK:   [[REF:%.*]] = call {{.*}} @swift_allocObject
+// CHECK:   [[CLOSURE:%.*]] = insertvalue { ptr, ptr } { ptr @"$s15takingEmptyAndQTA{{(\.ptrauth)?}}", ptr undef }, ptr [[REF]], 1
+// CHECK: }
+
+sil public @bind_polymorphic_param_from_context_3 : $@convention(thin) <τ_0_1>(@in τ_0_1, EmptyType) -> @owned @callee_owned () -> () {
+bb0(%0 : $*τ_0_1, %2: $EmptyType):
+  %1 = alloc_ref $WeakBox<BaseProducer<τ_0_1>>
+  %8 = function_ref @takingEmptyAndQ : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (EmptyType, @owned WeakBox<τ_0_0>) -> ()
+  %9 = partial_apply %8<BaseProducer<τ_0_1>>(%2, %1) : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (EmptyType, @owned WeakBox<τ_0_0>) -> ()
+  return %9 : $@callee_owned () -> ()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc { ptr, ptr } @bind_polymorphic_param_from_forwarder_parameter(ptr noalias %0, ptr %"\CF\84_0_1")
+// CHECK: entry:
+// CHECK:   [[TMP:%.*]] = call swiftcc %swift.metadata_response @"$s23partial_apply_forwarder12BaseProducerVMa"([[INT]] 255, ptr %"\CF\84_0_1")
+// CHECK:   [[BPTY:%.*]] = extractvalue %swift.metadata_response [[TMP]], 0
+// CHECK:   [[TMP:%.*]] = call swiftcc %swift.metadata_response @"$s23partial_apply_forwarder7WeakBoxCMa"([[INT]] 0, ptr [[BPTY]]
+// CHECK:   [[WBTY:%.*]] = extractvalue %swift.metadata_response [[TMP]], 0
+// CHECK:   call noalias ptr @swift_allocObject(ptr [[WBTY]]
+// CHECK:   ret void
+
+// CHECK-LABEL: define internal swiftcc void @"$s7takingQTA.13"(ptr %0, ptr swiftself %1)
+// CHECK: entry:
+// CHECK:   [[WITNESS:%.*]] = load ptr, ptr [[WITNESSADDR:%.*]]
+// CHECK:   tail call swiftcc void @takingQ(ptr %0, ptr [[WITNESS:%.*]])
+// CHECK:   ret void
+
+sil public @bind_polymorphic_param_from_forwarder_parameter : $@convention(thin) <τ_0_1>(@in τ_0_1) -> @callee_owned (@owned WeakBox<BaseProducer<τ_0_1>>) -> () {
+bb0(%0 : $*τ_0_1):
+  %1 = alloc_ref $WeakBox<BaseProducer<τ_0_1>>
+  %8 = function_ref @takingQ : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (@owned WeakBox<τ_0_0>) -> ()
+  %9 = partial_apply %8<BaseProducer<τ_0_1>>() : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (@owned WeakBox<τ_0_0>) -> ()
+  return %9 : $@callee_owned (@owned WeakBox<BaseProducer<τ_0_1>>) -> ()
+}
+
+struct S {
+  var x : Builtin.Int64
+}
+
+sil hidden_external @takingQAndS : $@convention(thin) <τ_0_0 where  τ_0_0 : Q> (S, @owned WeakBox<τ_0_0>) -> ()
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc {{.*}} @bind_polymorphic_param_from_context_with_layout(ptr noalias %0, i64 %1, ptr %"\CF\84_0_1")
+// CHECK: entry:
+// CHECK:   [[TMP:%.*]] = call swiftcc %swift.metadata_response @"$s23partial_apply_forwarder12BaseProducerVMa"([[INT]] 255, ptr %"\CF\84_0_1")
+// CHECK:   [[BPTY:%.*]] = extractvalue %swift.metadata_response [[TMP]], 0
+// CHECK:   [[TMP:%.*]] = call swiftcc %swift.metadata_response @"$s23partial_apply_forwarder7WeakBoxCMa"([[INT]] 0, ptr [[BPTY]]
+// CHECK:   [[WBTY:%.*]] = extractvalue %swift.metadata_response [[TMP]], 0
+// CHECK:   [[WBREF:%.*]] = call noalias ptr @swift_allocObject(ptr [[WBTY]]
+// CHECK:   [[CONTEXT0:%.*]] = call noalias ptr @swift_allocObject
+
+// CHECK:   [[WITNESS_ADDR:%.*]] = getelementptr inbounds <{ %swift.refcounted,{{.*}} %T23partial_apply_forwarder1SV, ptr }>, ptr [[CONTEXT0]], i32 0, i32 {{(1|2)}}
+// CHECK:   [[WITNESS:%.*]] = call ptr @swift_getWitnessTable(ptr @"$s23partial_apply_forwarder12BaseProducerVyxGAA1QAAMc", ptr [[BPTY]], ptr undef)
+// CHECK:   store ptr [[WITNESS]], ptr [[WITNESS_ADDR]]
+
+// CHECK:   [[SADDR:%.*]] = getelementptr inbounds <{ %swift.refcounted,{{.*}} %T23partial_apply_forwarder1SV, ptr }>, ptr [[CONTEXT0]], i32 0, i32 {{(2|3)}}
+// CHECK:   [[XADDR:%.*]] = getelementptr inbounds %T23partial_apply_forwarder1SV, ptr [[SADDR]], i32 0, i32 0
+// CHECK:   store i64 %1, ptr [[XADDR]]
+
+// CHECK:   [[WBADDR:%.*]] = getelementptr inbounds <{ %swift.refcounted,{{.*}} %T23partial_apply_forwarder1SV, ptr }>, ptr [[CONTEXT0]], i32 0, i32 {{(3|4)}}
+// CHECK:   store ptr [[WBREF]], ptr [[WBADDR]]
+// CHECK:   [[CLOSURE:%.*]] = insertvalue { ptr, ptr } { ptr @"$s11takingQAndSTA{{(\.ptrauth)?}}", ptr undef }, ptr [[CONTEXT0]], 1
+// CHECK:   ret { ptr, ptr } [[CLOSURE]]
+
+// CHECK-LABEL: define internal swiftcc void @"$s11takingQAndSTA"(ptr swiftself %0)
+// CHECK: entry:
+
+// CHECK:   [[WITNESS_ADDR:%.*]] = getelementptr inbounds <{ %swift.refcounted,{{.*}} %T23partial_apply_forwarder1SV, ptr }>, ptr %0, i32 0, i32 {{(1|2)}}
+// CHECK:   [[WITNESS:%.*]] = load ptr, ptr [[WITNESS_ADDR]]
+
+// CHECK:   [[SADDR:%.*]] = getelementptr inbounds <{ %swift.refcounted,{{.*}} %T23partial_apply_forwarder1SV, ptr }>, ptr %0, i32 0, i32 {{(2|3)}}
+// CHECK:   [[XADDR:%.*]] = getelementptr inbounds %T23partial_apply_forwarder1SV, ptr [[SADDR]], i32 0, i32 0
+// CHECK:   [[X:%.*]] = load i64, ptr [[XADDR]]
+
+// CHECK:   [[WBADDR:%.*]] = getelementptr inbounds <{ %swift.refcounted,{{.*}} %T23partial_apply_forwarder1SV, ptr }>, ptr %0, i32 0, i32 {{(3|4)}}
+// CHECK:   [[WB:%.*]] = load ptr, ptr [[WBADDR]]
+// CHECK:   call ptr @swift_retain(ptr returned [[WB]])
+// CHECK:   [[TY:%.*]] = load ptr, ptr [[WB]]
+// CHECK:   call void @swift_release(ptr %0)
+// CHECK:   tail call swiftcc void @takingQAndS(i64 [[X]], ptr [[WB]], ptr [[WITNESS]])
+sil public @bind_polymorphic_param_from_context_with_layout : $@convention(thin) <τ_0_1>(@in τ_0_1, S) -> @owned @callee_owned () -> () {
+bb0(%0 : $*τ_0_1, %1: $S):
+  %2 = alloc_ref $WeakBox<BaseProducer<τ_0_1>>
+  %8 = function_ref @takingQAndS : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (S, @owned WeakBox<τ_0_0>) -> ()
+  %9 = partial_apply %8<BaseProducer<τ_0_1>>(%1, %2) : $@convention(thin) <τ_0_0 where τ_0_0 : Q> (S, @owned WeakBox<τ_0_0>) -> ()
+  return %9 : $@callee_owned () -> ()
+}
+
+public class Empty<T> {}
+
+sil private @inner_closure : $@convention(thin) <T> (Empty<T>) -> @owned Empty<T> {
+bb0(%0 : $Empty<T>):
+  return %0 : $Empty<T>
+}
+
+sil hidden @returns_closure : $@convention(thin) <T> (Empty<T>) -> (@owned Empty<T>, @callee_guaranteed @owned (Empty<T>) -> @owned Empty<T>) {
+bb0(%0 : $Empty<T>):
+  %1 = function_ref @inner_closure : $@convention(thin) <τ_0_0> (Empty<τ_0_0>) -> @owned Empty<τ_0_0>
+  %2 = partial_apply [callee_guaranteed] %1<T>() : $@convention(thin) <τ_0_0> (Empty<τ_0_0>) -> @owned Empty<τ_0_0>
+  %5 = tuple (%0 : $Empty<T>, %2 : $@callee_guaranteed (Empty<T>) -> @owned Empty<T>)
+  return %5 : $(Empty<T>, @callee_guaranteed (Empty<T>) -> @owned Empty<T>)
+}
+
+sil hidden @specializes_closure_returning_closure : $@convention(thin) () -> @callee_guaranteed (Empty<S>) -> (@owned Empty<S>, @owned @callee_guaranteed (Empty<S>) -> @owned Empty<S>) {
+bb0:
+  %0 = function_ref @returns_closure : $@convention(thin) <τ_0_0> (Empty<τ_0_0>) -> (@owned Empty<τ_0_0>, @owned @callee_guaranteed (Empty<τ_0_0>) -> @owned Empty<τ_0_0>)
+  %1 = partial_apply [callee_guaranteed] %0<S>() : $@convention(thin) <τ_0_0> (Empty<τ_0_0>) -> (@owned Empty<τ_0_0>, @owned @callee_guaranteed (Empty<τ_0_0>) -> @owned Empty<τ_0_0>)
+  return %1 : $@callee_guaranteed (Empty<S>) -> (@owned Empty<S>, @owned @callee_guaranteed (Empty<S>) -> @owned Empty<S>)
+}
+
+// CHECK-LABEL: define hidden swiftcc { ptr, ptr } @specializes_closure_returning_closure() #0 {
+// CHECK: entry:
+// CHECK: ret { ptr, ptr } { ptr @"{{.*}}returns_closure{{.*}}", ptr null }
+
+protocol MyEquatable {
+  static func isEqual (lhs: Self, rhs: Self) -> Builtin.Int1
+}
+
+protocol MyExtended : MyEquatable {
+  func extended()
+}
+public struct Inner<Element> {
+  public init()
+  public init(_ e: Element)
+}
+
+extension Inner : MyEquatable where Element : MyEquatable {
+  public static func isEqual (lhs: Inner<Element>, rhs: Inner<Element>) -> Builtin.Int1
+}
+
+public struct Outer<Value> {
+  init()
+}
+
+extension Outer : MyEquatable where Value : MyEquatable {
+  public static func isEqual (lhs: Outer<Value>, rhs: Outer<Value>) -> Builtin.Int1
+}
+
+public struct Outermost<Value> {
+}
+
+sil @$closure : $@convention(method) <Value where Value : MyEquatable> (Outer<Value>, Outer<Value>, @thin Outer<Value>.Type) -> Builtin.Int1
+sil @$closure2 : $@convention(method) <Value where Value : MyEquatable> (Outermost<Value>, Outermost<Value>, @thin Outermost<Value>.Type) -> Builtin.Int1
+
+sil @$dont_crash_test_capture_specialized_conditional_conformance : $@convention(thin) <Element where Element : MyExtended> (Outer<Inner<Element>>) -> () {
+bb0(%0 : $Outer<Inner<Element>>):
+  %2 = alloc_stack $Outer<Inner<Element>>
+  store %0 to %2 : $*Outer<Inner<Element>>
+  %4 = metatype $@thin Outer<Inner<Element>>.Type
+  %5 = function_ref @$closure : $@convention(method) <τ_0_0 where τ_0_0 : MyEquatable> (Outer<τ_0_0>, Outer<τ_0_0>, @thin Outer<τ_0_0>.Type) -> Builtin.Int1
+  %6 = partial_apply [callee_guaranteed] %5<Inner<Element>>(%4) : $@convention(method) <τ_0_0 where τ_0_0 : MyEquatable> (Outer<τ_0_0>, Outer<τ_0_0>, @thin Outer<τ_0_0>.Type) -> Builtin.Int1
+  strong_release %6 : $@callee_guaranteed (Outer<Inner<Element>>, Outer<Inner<Element>>) -> Builtin.Int1
+  dealloc_stack %2 : $*Outer<Inner<Element>>
+  %15 = tuple ()
+  return %15 : $()
+}
+
+protocol AssocType {
+  associatedtype A : MyExtended
+}
+
+sil @$dont_crash_test_capture_specialized_conditional_conformance_associated_type : $@convention(thin) <Element where Element : AssocType> (Outer<Inner<Element.A>>) -> () {
+bb0(%0 : $Outer<Inner<Element.A>>):
+  %2 = alloc_stack $Outer<Inner<Element.A>>
+  store %0 to %2 : $*Outer<Inner<Element.A>>
+  %4 = metatype $@thin Outer<Inner<Element.A>>.Type
+  %5 = function_ref @$closure : $@convention(method) <τ_0_0 where τ_0_0 : MyEquatable> (Outer<τ_0_0>, Outer<τ_0_0>, @thin Outer<τ_0_0>.Type) -> Builtin.Int1
+  %6 = partial_apply [callee_guaranteed] %5<Inner<Element.A>>(%4) : $@convention(method) <τ_0_0 where τ_0_0 : MyEquatable> (Outer<τ_0_0>, Outer<τ_0_0>, @thin Outer<τ_0_0>.Type) -> Builtin.Int1
+  strong_release %6 : $@callee_guaranteed (Outer<Inner<Element.A>>, Outer<Inner<Element.A>>) -> Builtin.Int1
+  dealloc_stack %2 : $*Outer<Inner<Element.A>>
+  %15 = tuple ()
+  return %15 : $()
+}
+
+sil @$dont_crash_test_capture_specialized_conditional_conformance_nested : $@convention(thin) <A, B, Element where Element : MyEquatable> (Outer<Inner<Element>>) -> () {
+bb0(%0 : $Outer<Inner<Element>>):
+  %4 = metatype $@thin Outermost<Outer<Inner<Element>>>.Type
+  %5 = function_ref @$closure2 : $@convention(method) <Value where Value : MyEquatable> (Outermost<Value>, Outermost<Value>, @thin Outermost<Value>.Type) -> Builtin.Int1
+  %6 = partial_apply [callee_guaranteed] %5<Outer<Inner<Element>>>(%4) : $@convention(method) <Value where Value : MyEquatable> (Outermost<Value>, Outermost<Value>, @thin Outermost<Value>.Type) -> Builtin.Int1
+  strong_release %6 : $@callee_guaranteed (Outermost<Outer<Inner<Element>>>, Outermost<Outer<Inner<Element>>>) -> Builtin.Int1
+  %15 = tuple ()
+  return %15 : $()
+}
+
+
+sil_vtable WeakBox {}
+sil_vtable C {}
+sil_vtable D {}
+sil_vtable E {}
+sil_vtable Empty {}
+sil_witness_table C: P module main {}

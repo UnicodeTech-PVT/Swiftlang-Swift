@@ -1,0 +1,58 @@
+// RUN: %target-sil-opt -enable-copy-propagation=requested-passes-only -enable-lexical-lifetimes=false -sil-lexical-lifetime-eliminator %s -enable-sil-verify-all | %FileCheck %s
+
+sil_stage raw
+
+import Builtin
+
+class Klass {}
+
+sil @getKlass : $() -> (@owned Klass)
+
+// CHECK-LABEL: sil [ossa] @lexical_lifetime_object : $@convention(thin) (@owned Klass) -> () {
+// CHECK: bb0(%0 : @owned $Klass):
+// CHECK-NEXT:   %1 = begin_borrow %0 : $Klass
+// CHECK-NEXT:   end_borrow %1 : $Klass
+// CHECK-NEXT:   destroy_value %0 : $Klass
+// CHECK-NEXT:   tuple ()
+// CHECK-NEXT:   return
+// CHECK-NEXT: }
+sil [ossa] @lexical_lifetime_object : $@convention(thin) (@owned Klass) -> () {
+bb0(%0 : @owned $Klass):
+  %1 = begin_borrow [lexical] %0 : $Klass
+  end_borrow %1 : $Klass
+  destroy_value %0 : $Klass
+  %9999 = tuple()
+  return %9999 : $()
+}
+
+// CHECK-LABEL: sil [ossa] @lexical_lifetime_move : {{.*}} {
+// CHECK-NOT: move_value [lexical]
+// CHECK:     move_value
+// CHECK-LABEL: } // end sil function 'lexical_lifetime_move'
+sil [ossa] @lexical_lifetime_move : $@convention(thin) () -> () {
+  %getKlass = function_ref @getKlass : $@convention(thin) () -> (@owned Klass)
+  %instance = apply %getKlass() : $@convention(thin) () -> (@owned Klass) 
+  %lifetime = move_value [lexical] %instance : $Klass
+  destroy_value %lifetime : $Klass
+  %retval = tuple ()
+  return %retval : $()
+}
+
+// CHECK-LABEL: sil [ossa] @lexical_lifetime_address : $@convention(thin) (@in Klass) -> () {
+// CHECK: bb0(%0 : $*Klass):
+// CHECK-NEXT:   %1 = alloc_stack $Klass
+// CHECK-NEXT:   copy_addr [take] %0 to [init] %1 : $*Klass
+// CHECK-NEXT:   destroy_addr %1 : $*Klass
+// CHECK-NEXT:   dealloc_stack %1 : $*Klass
+// CHECK-NEXT:   tuple ()
+// CHECK-NEXT:   return
+// CHECK-NEXT: }
+sil [ossa] @lexical_lifetime_address : $@convention(thin) (@in Klass) -> () {
+bb0(%0 : $*Klass):
+  %1 = alloc_stack [lexical] $Klass
+  copy_addr [take] %0 to [init] %1 : $*Klass
+  destroy_addr %1 : $*Klass
+  dealloc_stack %1 : $*Klass
+  %9999 = tuple()
+  return %9999 : $()
+}

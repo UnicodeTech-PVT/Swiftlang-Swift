@@ -1,0 +1,15 @@
+
+struct User: Codable {
+
+    private enum CodingKeys: CodingKey {
+    }
+
+    init(from decoder: any Decoder) throws {
+
+    }
+
+    func encode(to encoder: any Encoder) throws {
+      var container = encoder.container(keyedBy: User.CodingKeys.self)
+
+    }
+}

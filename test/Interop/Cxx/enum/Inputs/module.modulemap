@@ -1,0 +1,43 @@
+module BoolEnums {
+  header "bool-enums.h"
+  requires cplusplus
+}
+
+module ScopedEnums {
+  header "scoped-enums.h"
+  requires cplusplus
+}
+
+module AnonymousWithSwiftName {
+  header "anonymous-with-swift-name.h"
+  requires cplusplus
+}
+
+module CenumsWithOptionsOmit {
+  header "c-enums-withOptions-omit.h"
+  requires cplusplus
+}
+
+module CenumsNSOptions {
+  header "c-enums-NS_OPTIONS.h"
+  requires cplusplus
+}
+
+module TypedUntypedEnums {
+  header "typed-untyped-enums.h"
+  requires cplusplus
+}
+
+module CenumsNSOptionsExternC [extern_c] {
+  header "c-enums-NS_OPTIONS_without_extern_C.h"
+  requires cplusplus
+}
+
+module CFAvailability {
+    header "CFAvailability.h"
+}
+
+module NestedEnums {
+    header "nested-enums.h"
+    requires cplusplus
+}

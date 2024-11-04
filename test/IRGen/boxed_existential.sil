@@ -1,0 +1,115 @@
+// RUN: %target-swift-frontend %s -emit-ir | %FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-%target-ptrsize --check-prefix=CHECK-%target-runtime
+
+import Swift
+
+sil @error_user : $@convention(thin) (@owned Error) -> ()
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @retain_release_boxed_existential(ptr %0)
+sil @retain_release_boxed_existential : $@convention(thin) (@owned Error) -> () {
+entry(%e : $Error):
+  // CHECK-objc: @swift_errorRetain
+  // CHECK-native: @swift_retain
+  strong_retain %e : $Error
+  %1 = function_ref @error_user : $@convention(thin) (@owned Error) -> ()
+  apply %1(%e) : $@convention(thin) (@owned Error) -> ()
+  // CHECK-objc: @swift_errorRelease
+  // CHECK-native: @swift_release
+  strong_release %e : $Error
+  return undef : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @alloc_boxed_existential(ptr noalias %0, ptr %T, ptr %T.Error)
+sil @alloc_boxed_existential : $@convention(thin) <T: Error> (@in T) -> @owned Error {
+entry(%x : $*T):
+  // CHECK: [[BOX_PAIR:%.*]] = call swiftcc { ptr, ptr } @swift_allocError(ptr %T, ptr %T.Error, ptr null, i1 false)
+  // CHECK: [[BOX:%.*]] = extractvalue { ptr, ptr } [[BOX_PAIR]], 0
+  // CHECK: [[ADDR:%.*]] = extractvalue { ptr, ptr } [[BOX_PAIR]], 1
+  %b = alloc_existential_box $Error, $T
+  %p = project_existential_box $T in %b : $Error
+  // CHECK: load ptr, ptr
+  // CHECK: [[INITWITHTAKE:%.*]] = load ptr, ptr
+  // CHECK: call ptr [[INITWITHTAKE]](ptr noalias [[ADDR]], ptr noalias %0, ptr %T)
+  copy_addr [take] %x to [init] %p : $*T
+  // CHECK: ret ptr [[BOX]]
+  return %b : $Error
+}
+
+struct SomeError: Error {
+  let _domain: String
+  let _code: Int
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc ptr @alloc_boxed_existential_concrete
+sil @alloc_boxed_existential_concrete : $@convention(thin) (@owned SomeError) -> @owned Error {
+entry(%x : $SomeError):
+  // CHECK: [[BOX_PAIR:%.*]] = call swiftcc { ptr, ptr } @swift_allocError(ptr {{.*}} @"$s17boxed_existential9SomeErrorVMf", {{.*}}, ptr {{%.*|@"\$s17boxed_existential9SomeErrorVs0D0AAWP"}}, ptr null, i1 false)
+  // CHECK: [[BOX:%.*]] = extractvalue { ptr, ptr } [[BOX_PAIR]], 0
+  // CHECK: [[OPAQUE_ADDR:%.*]] = extractvalue { ptr, ptr } [[BOX_PAIR]], 1
+  %b = alloc_existential_box $Error, $SomeError
+  %p = project_existential_box $SomeError in %b : $Error
+  store %x to %p : $*SomeError
+  // CHECK: ret ptr [[BOX]]
+  return %b : $Error
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @dealloc_boxed_existential(ptr %0, ptr %T, ptr %T.Error)
+sil @dealloc_boxed_existential : $@convention(thin) <T: Error> (@owned Error) -> () {
+entry(%b : $Error):
+  // CHECK: call void @swift_deallocError(ptr %0, ptr %T)
+  dealloc_existential_box %b : $Error, $T
+  return undef : $()
+}
+
+struct Str : Error { }
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @alloc_dealloc_box_with_concrete_type
+sil @alloc_dealloc_box_with_concrete_type : $@convention(thin) () -> () {
+bb0:
+  // CHECK: call {{.*}} @swift_allocError
+  %b = alloc_existential_box $Error, $Str
+  // CHECK: call void @swift_deallocError
+  dealloc_existential_box %b : $Error, $Str
+  %r = tuple ()
+  return %r : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc {{i[0-9]+}} @project_boxed_existential(ptr %0)
+sil @project_boxed_existential : $@convention(thin) (@owned Error) -> Int {
+entry(%b : $Error):
+  // CHECK: call void @swift_getErrorValue(ptr %0, ptr {{%.*}}, ptr [[OUT:%.*]])
+  // CHECK: [[OUT_ADDR:%.*]] = getelementptr inbounds {{.*}} [[OUT]], i32 0, i32 0
+  // CHECK: [[ADDR:%.*]] = load {{.*}} [[OUT_ADDR]]
+  %a = project_existential_box $SomeError in %b : $Error
+
+  // CHECK: [[GEP1:%.*]] = getelementptr inbounds %T17boxed_existential9SomeErrorV, ptr %2, i32 0, i32 1
+  // CHECK: [[GEP2:%.*]] = getelementptr inbounds {{.*}} [[GEP1]], i32 0, i32 0
+  %c = struct_element_addr %a : $*SomeError, #SomeError._code
+
+  // CHECK: [[R:%.*]] = load {{i[0-9]+}}, ptr [[GEP2]]
+  %l = load %c : $*Int
+
+  // CHECK: ret {{i[0-9]+}} [[R]]
+  return %l : $Int
+}
+
+sil @dynamic_type_boxed_existential : $@convention(thin) (@owned Error) -> @thick Error.Type {
+entry(%b : $Error):
+  // CHECK: call void @swift_getErrorValue(ptr %0, ptr {{%.*}}, ptr [[OUT:%.*]])
+  // CHECK: [[OUT_ADDR:%.*]] = getelementptr inbounds {{.*}} [[OUT]], i32 0, i32 0
+  // CHECK: [[ADDR:%.*]] = load {{.*}} [[OUT_ADDR]]
+  // CHECK: [[OUT_TYPE:%.*]] = getelementptr inbounds {{.*}} [[OUT]], i32 0, i32 1
+  // CHECK: [[TYPE:%.*]] = load {{.*}} [[OUT_TYPE]]
+  // CHECK: [[DYNAMIC_TYPE:%.*]] = call ptr @swift_getDynamicType(ptr [[ADDR]], ptr [[TYPE]], i1 true)
+  // CHECK: [[OUT_WITNESS:%.*]] = getelementptr inbounds {{.*}} [[OUT]], i32 0, i32 2
+  // CHECK: [[WITNESS:%.*]] = load {{.*}} [[OUT_WITNESS]]
+  %m = existential_metatype $@thick Error.Type, %b : $Error
+
+  // CHECK-objc:   call void @swift_errorRelease(ptr %0)
+  // CHECK-native: call void @swift_release(ptr %0)
+  strong_release %b : $Error
+
+  // CHECK: [[RET:%.*]] = insertvalue { ptr, ptr } undef, ptr [[DYNAMIC_TYPE]], 0
+  // CHECK: [[RET2:%.*]] = insertvalue { ptr, ptr } [[RET]], ptr [[WITNESS]], 1
+  // CHECK: ret { ptr, ptr } [[RET2]]
+  return %m : $@thick Error.Type
+}

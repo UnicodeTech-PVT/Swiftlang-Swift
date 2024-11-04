@@ -1,0 +1,48 @@
+// RUN: %target-sil-opt -enable-sil-verify-all %s -onone-simplification -simplify-instruction=apply | %FileCheck %s
+
+// REQUIRES: swift_in_compiler
+
+sil_stage canonical
+
+import Builtin
+import Swift
+import SwiftShims
+
+class Bar {
+  init()
+  func foo() -> Int
+}
+
+sil @cl : $@convention(thin) () -> Int
+
+// CHECK-LABEL: sil [ossa] @thick_to_thin :
+// CHECK:         [[F:%.*]] = function_ref @cl
+// CHECK:         apply [[F]]() : $@convention(thin
+// CHECK:       } // end sil function 'thick_to_thin'
+sil [ossa] @thick_to_thin : $@convention(thin) () -> Int {
+bb0:
+  %0 = function_ref @cl : $@convention(thin) () -> Int
+  %1 = thin_to_thick_function %0 : $@convention(thin) () -> Int to $@callee_guaranteed () -> Int
+  %2 = apply %1() : $@callee_guaranteed () -> Int
+  return %2 : $Int
+}
+
+// CHECK-LABEL: sil @devirt_class_method :
+// CHECK:         [[F:%.*]] = function_ref @bar_foo
+// CHECK:         apply [[F]]
+// CHECK:       } // end sil function 'devirt_class_method'
+sil @devirt_class_method : $@convention(thin) () -> Int {
+bb0:
+  %0 = alloc_ref $Bar
+  %1 = class_method %0 : $Bar, #Bar.foo : (Bar) -> () -> Int, $@convention(method) (@guaranteed Bar) -> Int
+  %2 = apply %1(%0) : $@convention(method) (@guaranteed Bar) -> Int
+  strong_release %0 : $Bar
+  return %2 : $Int
+}
+
+sil @bar_foo : $@convention(method) (@guaranteed Bar) -> Int
+
+sil_vtable Bar {
+  #Bar.foo: @bar_foo
+}
+

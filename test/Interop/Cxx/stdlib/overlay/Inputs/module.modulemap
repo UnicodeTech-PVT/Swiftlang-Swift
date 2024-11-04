@@ -1,0 +1,18 @@
+module ConvertibleToBool {
+  header "convertible-to-bool.h"
+  requires cplusplus
+  export *
+}
+
+module CustomIterator {
+  header "custom-iterator.h"
+  requires cplusplus
+  export *
+}
+
+module CustomSequence {
+  header "custom-sequence.h"
+  header "custom-collection.h"
+  requires cplusplus
+  export *
+}

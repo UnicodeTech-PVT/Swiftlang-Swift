@@ -1,0 +1,213 @@
+//===--- ucrt.modulemap ---------------------------------------------------===//
+//
+// This source file is part of the Swift.org open source project
+//
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
+
+module _complex [system] {
+  header "complex.h"
+  export *
+}
+
+module ucrt [system] {
+  module C {
+    module ctype {
+      header "ctype.h"
+      export *
+    }
+
+    module errno {
+      header "errno.h"
+      export *
+    }
+
+    module fenv {
+      header "fenv.h"
+      export *
+    }
+
+    module float {
+      header "float.h"
+      export *
+    }
+
+    module inttypes {
+      header "inttypes.h"
+      export *
+    }
+
+    module locale {
+      header "locale.h"
+      export *
+    }
+
+    module math {
+      header "math.h"
+      export *
+    }
+
+    module signal {
+      header "signal.h"
+      export *
+    }
+
+    module stddef {
+      header "stddef.h"
+      export *
+    }
+
+    module stdio {
+      header "stdio.h"
+      export *
+
+      // NOTE(compnerd) this is a horrible workaround for the fact that
+      // Microsoft has fully inlined nearly all of the printf family of
+      // functions in the headers which results in the definitions being elided
+      // resulting in undefined symbols.  The legacy_stdio_definitions provides
+      // out-of-line definitions for these functions.
+      link "legacy_stdio_definitions"
+    }
+
+    module stdlib {
+      header "stdlib.h"
+      export *
+    }
+
+    module string {
+      header "string.h"
+      export *
+    }
+
+    module time {
+      header "time.h"
+      export *
+    }
+
+    module POSIX {
+      module fcntl {
+        header "fcntl.h"
+        export *
+      }
+
+      module sys {
+        export *
+
+        module stat {
+          header "sys/stat.h"
+          header "direct.h"
+          export *
+        }
+
+        module timeb {
+          header "sys/timeb.h"
+          export *
+        }
+
+        module types {
+          header "sys/types.h"
+          export *
+        }
+
+        module utime {
+          header "sys/utime.h"
+          export *
+        }
+      }
+    }
+  }
+
+  module conio {
+    header "conio.h"
+    export *
+  }
+
+  module dos {
+    header "dos.h"
+    export *
+  }
+
+  module malloc {
+    header "malloc.h"
+    export *
+  }
+
+  module minmax {
+    header "minmax.h"
+    export *
+  }
+
+  module multibyte {
+    header "mbstring.h"
+    export *
+  }
+
+  module process {
+    header "process.h"
+    export *
+  }
+
+  module wchar {
+    header "wchar.h"
+    export *
+  }
+}
+
+module corecrt [system] {
+  use vcruntime
+
+  header "corecrt.h"
+  header "corecrt_stdio_config.h"
+  export *
+
+  module conio {
+    header "corecrt_wconio.h"
+    export *
+  }
+
+  module io {
+    header "corecrt_io.h"
+    export *
+  }
+
+  module malloc {
+    header "corecrt_malloc.h"
+    export *
+  }
+
+  module math {
+    header "corecrt_math.h"
+    export *
+  }
+
+  module share {
+    header "corecrt_share.h"
+    export *
+  }
+
+  module stdio {
+    header "corecrt_wstdio.h"
+    export *
+  }
+
+  module stdlib {
+    header "corecrt_wstdlib.h"
+    export *
+  }
+
+  module string {
+    header "corecrt_wstring.h"
+    export *
+  }
+
+  module time {
+    header "corecrt_wtime.h"
+    export *
+  }
+}
+

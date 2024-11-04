@@ -1,0 +1,63 @@
+// RUN: %target-swift-frontend %s -emit-ir | %FileCheck %s
+
+// REQUIRES: CPU=x86_64
+
+import Swift
+
+class C {}
+sil_vtable C {}
+
+struct JustWeak {
+  weak var x: C?
+}
+
+struct NoWeak {
+  var x, y: C
+}
+
+struct SomeWeak {
+  var x: C
+  weak var y: C?
+}
+
+struct Gen<T> {
+  var x: C
+  var y: T
+}
+
+// CHECK-NOT: define internal ptr @"$s20weak_value_witnesses8JustWeakVwTK"(
+
+// The default memcpy-ing witness is good enough for NoWeak.
+// CHECK-NOT: define internal ptr @"$s20weak_value_witnesses6NoWeakVwtk"(ptr %dest, ptr %src, ptr %Self)
+
+// CHECK-NOT: @"$s20weak_value_witnesses6NoWeakVwTK"
+
+// CHECK-LABEL: define internal ptr @"$s20weak_value_witnesses8JustWeakVwCP"
+// CHECK: entry:
+// CHECK:  load ptr, ptr
+// CHECK:  call ptr @swift_retain
+// CHECK:  store ptr
+// CHECK:  load ptr
+// CHECK:  getelementptr inbounds i8
+// CHECK:  ret ptr
+// CHECK:}
+
+// CHECK-LABEL: define internal ptr @"$s20weak_value_witnesses8SomeWeakVwCP"
+// CHECK:entry:
+// CHECK:  load ptr, ptr
+// CHECK:  call ptr @swift_retain
+// CHECK:  store ptr
+// CHECK:  load ptr
+// CHECK:  getelementptr inbounds i8
+// CHECK:  ret ptr
+// CHECK:}
+
+// Weak references must be taken by swift_weakTakeInit.
+// CHECK-LABEL: define internal ptr @"$s20weak_value_witnesses8SomeWeakVwtk"(ptr noalias %dest, ptr noalias %src, ptr %SomeWeak)
+// CHECK:         call ptr @swift_weakTakeInit
+
+// CHECK-NOT: define internal ptr @"$s20weak_value_witnesses8SomeWeakVwTK"(
+
+// Generic types must be taken using their value witness.
+// CHECK-LABEL: define internal ptr @"$s20weak_value_witnesses3GenVwtk"(ptr noalias %dest, ptr noalias %src, ptr %"Gen<T>")
+// CHECK:         call ptr

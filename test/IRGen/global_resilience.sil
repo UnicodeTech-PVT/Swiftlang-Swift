@@ -1,0 +1,171 @@
+// RUN: %empty-directory(%t)
+
+// RUN: %target-swift-frontend %S/../Inputs/resilient_struct.swift -enable-library-evolution -emit-module -emit-module-path %t/resilient_struct.swiftmodule
+// RUN: %target-swift-frontend -Xllvm -sil-disable-pass=simplification -enable-library-evolution -I %t -emit-ir %s | %FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-%target-cpu
+// RUN: %target-swift-frontend -Xllvm -sil-disable-pass=simplification -enable-library-evolution -I %t -emit-ir -O %s
+
+// CHECK: %swift.type = type { [[INT:i32|i64]] }
+
+sil_stage canonical
+
+import Builtin
+import Swift
+import SwiftShims
+
+import resilient_struct
+
+//
+// Fits inside a buffer's inline storage.
+//
+
+public struct SmallResilientStruct {
+  let x: Int32 = 0
+}
+
+// CHECK: @smallGlobal = {{(dllexport )?}}{{(protected )?}}global [[BUFFER:\[(12|24) x i8\]]] zeroinitializer{{.*}}align {{(8|4)}}
+sil_global [let] @smallGlobal : $SmallResilientStruct
+
+//
+// Requires out-of-line allocation.
+//
+
+public struct LargeResilientStruct {
+  let w: Int64 = 0
+  let x: Int64 = 0
+  let y: Int64 = 0
+  let z: Int64 = 0
+}
+
+// CHECK: @largeGlobal = {{(dllexport )?}}{{(protected )?}}global [[BUFFER]] zeroinitializer
+sil_global [let] @largeGlobal : $LargeResilientStruct
+
+//
+// Size is known in this resilience domain, and global is hidden,
+// so allocate it directly.
+//
+
+// CHECK: @fixedGlobal = hidden global %T17global_resilience20LargeResilientStructV zeroinitializer
+sil_global hidden @fixedGlobal : $LargeResilientStruct
+
+//
+// Unknown size -- must call value witness functions for buffer
+// management.
+//
+
+// CHECK: @otherGlobal = {{(dllexport )?}}{{(protected )?}}global [[BUFFER]] zeroinitializer
+sil_global [let] @otherGlobal : $Size
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc i32 @testSmallGlobal()
+sil @testSmallGlobal : $@convention(thin) () -> Int32 {
+bb0:
+  // This is just a no-op
+  alloc_global @smallGlobal
+
+  %addr = global_addr @smallGlobal : $*SmallResilientStruct
+
+  // CHECK: [[VALUE:%.*]] = load i32, ptr @smallGlobal
+  %x_addr = struct_element_addr %addr : $*SmallResilientStruct, #SmallResilientStruct.x
+  %x = load %x_addr : $*Int32
+
+  // CHECK: ret i32 [[VALUE]]
+  return %x : $Int32
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc void @testLargeGlobal()
+sil @testLargeGlobal : $@convention(thin) () -> () {
+bb0:
+  // CHECK: [[ALLOC:%.*]] = call noalias ptr @swift_slowAlloc([[INT]] 32, [[INT]] 7)
+  // CHECK: store ptr [[ALLOC]], ptr @largeGlobal, align {{(8|4)}}
+  alloc_global @largeGlobal
+
+  // CHECK: [[VALUE:%.*]] = load ptr, ptr @largeGlobal
+  %addr = global_addr @largeGlobal : $*LargeResilientStruct
+
+  %tuple = tuple ()
+
+  // CHECK: ret void
+  return %tuple : $()
+}
+
+// CHECK-LABEL: define{{( dllexport)?}}{{( protected)?}} swiftcc i64 @testFixedGlobal()
+sil @testFixedGlobal : $@convention(thin) () -> Int64 {
+bb0:
+  alloc_global @fixedGlobal
+
+  %addr = global_addr @fixedGlobal : $*LargeResilientStruct
+
+  // CHECK: [[VALUE:%.*]] = load i64, ptr getelementptr inbounds (%T17global_resilience20LargeResilientStructV, ptr @fixedGlobal, i32 0, i32 1)
+  %x_addr = struct_element_addr %addr : $*LargeResilientStruct, #LargeResilientStruct.x
+  %x = load %x_addr : $*Int64
+
+  // CHECK: ret i64 [[VALUE]]
+  return %x : $Int64
+}
+
+// CHECK-LABEL: define {{.*}} @testOtherGlobal
+sil @testOtherGlobal : $@convention(thin) () -> () {
+bb0:
+  // CHECK: [[T0:%.*]] = call swiftcc %swift.metadata_response @"$s16resilient_struct4SizeVMa"([[INT]] 0)
+  // CHECK: [[METADATA:%.*]] = extractvalue %swift.metadata_response [[T0]], 0
+  // CHECK: call ptr @__swift_allocate_value_buffer(ptr [[METADATA]], ptr @otherGlobal)
+    alloc_global @otherGlobal
+
+  // CHECK: call ptr @__swift_project_value_buffer(ptr [[METADATA]], ptr @otherGlobal)
+  %addr = global_addr @otherGlobal : $*Size
+
+  %tuple = tuple ()
+
+  // CHECK: ret void
+  return %tuple : $()
+}
+
+// CHECK-LABEL: define linkonce_odr hidden ptr @__swift_allocate_value_buffer(ptr %0, ptr %1)
+// CHECK: entry:
+// CHECK:   [[VWT_ADDR:%.*]] = getelementptr inbounds ptr, ptr %0, {{.*}} -1
+// CHECK:   [[VWT:%.*]] = load ptr, ptr [[VWT_ADDR]]
+// CHECK-arm64e-NEXT: ptrtoint ptr [[VWT_ADDR]] to i64
+// CHECK-arm64e-NEXT: call i64 @llvm.ptrauth.blend
+// CHECK-arm64e: [[VWT:%.*]] = inttoptr i64 {{%.*}} to ptr
+// CHECK:   [[FLAGS_ADDR:%.*]] = getelementptr inbounds %swift.vwtable, ptr [[VWT]], i32 0, i32 10
+// CHECK:   [[FLAGS:%.*]] = load i32, ptr [[FLAGS_ADDR]]
+// CHECK:   [[ISNOTINLINE:%.*]] = and i32 [[FLAGS]], 131072
+// CHECK:   [[ISINLINE:%.*]] = icmp eq i32 [[ISNOTINLINE]], 0
+// CHECK:   br i1 [[ISINLINE]], label %done, label %outline.allocateValueInBuffer
+//
+// CHECK: outline.allocateValueInBuffer:
+// CHECK:   [[VWT_ADDR:%.*]] = getelementptr inbounds ptr, ptr %0, {{.*}} -1
+// CHECK:   [[VWT:%.*]] = load ptr, ptr [[VWT_ADDR]]
+// CHECK-arm64e-NEXT: ptrtoint ptr [[VWT_ADDR]] to i64
+// CHECK-arm64e-NEXT: call i64 @llvm.ptrauth.blend
+// CHECK-arm64e: [[VWT:%.*]] = inttoptr i64 {{%.*}} to ptr
+// CHECK:   [[SIZE_ADDR:%.*]] = getelementptr inbounds %swift.vwtable, ptr [[VWT]], i32 0, i32 8
+// CHECK:   [[SIZE:%.*]] = load [[INT]], ptr [[SIZE_ADDR]]
+// CHECK:   [[ALIGN:%.*]] = and {{.*}}, 255
+// CHECK:   [[PTR:%.*]] = call noalias ptr @swift_slowAlloc({{.*}} [[SIZE]], {{.*}} [[ALIGN]])
+// CHECK:   store ptr [[PTR]], ptr %1
+// CHECK:   br label %done
+//
+// CHECK: done:
+// CHECK:   [[PHI:%.*]] = phi ptr [ %1, %entry ], [ [[PTR]], %outline.allocateValueInBuffer ]
+// CHECK:   ret ptr [[PHI]]
+
+
+// CHECK-LABEL: define linkonce_odr hidden ptr @__swift_project_value_buffer(ptr %0, ptr %1)
+// CHECK:   [[VWT_ADDR:%.*]] = getelementptr inbounds ptr, ptr %0, {{.*}} -1
+// CHECK:   [[VWT:%.*]] = load ptr, ptr [[VWT_ADDR]]
+// CHECK-arm64e-NEXT: ptrtoint ptr [[VWT_ADDR]] to i64
+// CHECK-arm64e-NEXT: call i64 @llvm.ptrauth.blend
+// CHECK-arm64e: [[VWT:%.*]] = inttoptr i64 {{%.*}} to ptr
+// CHECK:   [[FLAGS_ADDR:%.*]] = getelementptr inbounds %swift.vwtable, ptr [[VWT]], i32 0, i32 10
+// CHECK:   [[FLAGS:%.*]] = load i32, ptr [[FLAGS_ADDR]]
+// CHECK:   [[ISNOTINLINE:%.*]] = and i32 [[FLAGS]], 131072
+// CHECK:   [[ISINLINE:%.*]] = icmp eq i32 [[ISNOTINLINE]], 0
+// CHECK:   br i1 [[ISINLINE]], label %done, label %outline.projectValueInBuffer
+//
+// CHECK: outline.projectValueInBuffer:
+// CHECK:   [[PTR_TO_BUFFER:%.*]] = load ptr, ptr %1
+// CHECK:   br label %done
+//
+// CHECK: done:
+// CHECK:   [[PHI:%.*]] = phi ptr [ %1, %entry ], [ [[PTR_TO_BUFFER]], %outline.projectValueInBuffer ]
+// CHECK:   ret ptr [[PHI]]

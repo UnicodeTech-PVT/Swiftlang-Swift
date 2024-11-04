@@ -1,0 +1,58 @@
+// RUN: %target-sil-opt -enable-sil-verify-all %s -sil-combine | %FileCheck %s
+
+// REQUIRES: objc_interop
+
+// TODO: Update optimizer for id-as-Any changes.
+
+sil_stage canonical
+
+import Builtin
+import Swift
+import Foundation
+
+// CHECK-LABEL: sil shared [ossa] @bridge_from_swift_array_to_NSObject_cast
+// CHECK: function_ref @$sSa10FoundationE19_bridgeToObjectiveC{{[_0-9a-zA-Z]*}}F
+// CHECK-NOT: copy_value
+// CHECK: apply
+// CHECK: destroy_value
+// CHECK: upcast %{{.*}} : $NSArray to $NSObject
+// CHECK: store
+// CHECK: return
+sil shared [ossa] @bridge_from_swift_array_to_NSObject_cast: $@convention(thin) (@in Array<String>) -> @out NSObject {
+bb0(%0 : $*NSObject, %1 : $*Array<String>):
+  %2 = alloc_stack $Array<String>
+  copy_addr %1 to [init] %2 : $*Array<String>
+  unconditional_checked_cast_addr Array<String> in %2 : $*Array<String> to NSObject in %0 : $*NSObject
+  dealloc_stack %2 : $*Array<String>
+  destroy_addr %1 : $*Array<String>
+  %7 = tuple ()
+  return %7 : $()
+}
+
+enum AddressOnlyError : Error {
+  case data(Data)
+  case none
+}
+
+// Test that we emit a copy_addr for the address-only value initialization.
+
+// CHECK-LABEL: sil [ossa] @unconditional_checked_cast_addr_address_only_type
+// CHECK: alloc_stack $any Error
+// CHECK: alloc_stack $AddressOnlyError
+// CHECK:  copy_addr
+// CHECK: alloc_existential_box
+// CHECK: project_existential_box
+// CHECK: copy_addr
+// CHECK: store
+sil [ossa] @unconditional_checked_cast_addr_address_only_type: $@convention(thin) (@in_guaranteed AddressOnlyError) -> @owned Error {
+bb0(%0 : $*AddressOnlyError):
+  %1 = alloc_stack $Error
+  %2 = alloc_stack $AddressOnlyError
+  copy_addr %0 to [init] %2 : $*AddressOnlyError
+  unconditional_checked_cast_addr AddressOnlyError in %2 : $*AddressOnlyError to Error in %1 : $*Error
+  dealloc_stack %2 : $*AddressOnlyError
+  %8 = tuple ()
+  %9 = load [take] %1 : $*Error
+  dealloc_stack %1 : $*Error
+  return %9 : $Error
+}

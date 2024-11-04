@@ -1,0 +1,8 @@
+module StructDeclContext {
+  header "struct-decl-context.h"
+  export *
+}
+
+module ForeignReference {
+  header "foreign-reference.h"
+}

@@ -1,0 +1,17 @@
+// RUN: %target-swift-frontend %s -enable-objc-interop -disable-type-layout -emit-ir | %FileCheck %s
+
+// REQUIRES: CPU=x86_64
+
+import Builtin
+
+// ObjC payloads can be nullable too.
+enum NullableObjCRefcounted {
+  case Ref(Builtin.AnyObject)
+  case None
+}
+// CHECK-LABEL: define internal void @"$s39enum_value_semantics_special_cases_objc22NullableObjCRefcountedOwxx"(ptr noalias %object, ptr %NullableObjCRefcounted) {{.*}} {
+// CHECK: entry:
+// CHECK:   %0 = load ptr, ptr %object, align 8
+// CHECK:   call void @swift_unknownObjectRelease(ptr %0) {{#[0-9]+}}
+// CHECK:   ret void
+// CHECK: }

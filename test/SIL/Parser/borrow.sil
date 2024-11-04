@@ -1,0 +1,93 @@
+// RUN: %target-sil-opt %s | %target-sil-opt | %FileCheck %s
+
+sil_stage canonical
+
+import Builtin
+
+// We do not verify here, but just make sure that all of the combinations parse and print correctly.
+// CHECK-LABEL: sil [ossa] @borrow_test : $@convention(thin) (@in Builtin.NativeObject, @guaranteed Builtin.NativeObject) -> () {
+// CHECK: bb0([[ARG1:%[0-9]+]] : $*Builtin.NativeObject, [[ARG2:%[0-9]+]] : @guaranteed $Builtin.NativeObject):
+// CHECK: [[BORROWED_ARG2:%.*]] = begin_borrow [[ARG2]]
+// CHECK: end_borrow [[BORROWED_ARG2]]
+// CHECK: [[MEM:%.*]] = alloc_stack $Builtin.NativeObject
+// CHECK: [[SB:%.*]] = store_borrow [[ARG2]] to [[MEM]] : $*Builtin.NativeObject
+// CHECK: end_borrow [[SB]] : $*Builtin.NativeObject
+// CHECK: } // end sil function 'borrow_test'
+sil [ossa] @borrow_test : $@convention(thin) (@in Builtin.NativeObject, @guaranteed Builtin.NativeObject) -> () {
+bb0(%0 : $*Builtin.NativeObject, %1 : @guaranteed $Builtin.NativeObject):
+  %2 = begin_borrow %1 : $Builtin.NativeObject
+  end_borrow %2 : $Builtin.NativeObject
+
+  %3 = alloc_stack $Builtin.NativeObject
+  %sb = store_borrow %1 to %3 : $*Builtin.NativeObject
+  end_borrow %sb : $*Builtin.NativeObject
+  dealloc_stack %3 : $*Builtin.NativeObject
+  destroy_addr %0 : $*Builtin.NativeObject
+
+  %4 = tuple()
+  return %4 : $()
+}
+
+class C {}
+
+enum FakeOptional<T> {
+  case none
+  case some(T)
+}
+
+// CHECK-LABEL: sil [ossa] @foo
+// CHECK: begin_borrow {{%[^,]+}}
+// CHECK: begin_borrow [lexical] {{%[^,]+}}
+// CHECK: begin_borrow [var_decl] {{%[^,]+}}
+// CHECK-LABEL: } // end sil function 'foo'
+sil [ossa] @foo : $@convention(thin) () -> () {
+  %instance = alloc_ref $C
+  %guaranteed_c2 = begin_borrow %instance : $C
+  end_borrow %guaranteed_c2 : $C
+  %guaranteed_c = begin_borrow [lexical] %instance : $C
+  end_borrow %guaranteed_c : $C
+  %guaranteed_c3 = begin_borrow [var_decl] %instance : $C
+  end_borrow %guaranteed_c3 : $C
+  destroy_value %instance : $C
+  %res = tuple ()
+  return %res : $()
+}
+
+// CHECK-LABEL: sil [ossa] @reborrowTest : $@convention(thin) (@owned C) -> () {
+// CHECK:       bb3([[ARG:%.*]] : @reborrow @guaranteed $C):
+// CHECK-NEXT:    {{%.*}} = borrowed [[ARG]] : $C from (%0 : $C)
+// CHECK:       } // end sil function 'reborrowTest'
+sil [ossa] @reborrowTest : $@convention(thin) (@owned C) -> () {
+bb0(%0 : @owned $C):
+  cond_br undef, bb1, bb2
+
+bb1:
+  %b1 = begin_borrow %0 : $C
+  br bb3(%b1 : $C)
+
+bb2:
+  %b2 = begin_borrow %0 : $C
+  br bb3(%b2 : $C)
+
+bb3(%r : @reborrow @guaranteed $C):
+  %f = borrowed %r : $C from (%0 : $C)
+  end_borrow %f : $C
+  destroy_value %0 : $C
+  %9999 = tuple()
+  return %9999 : $()
+}
+
+// CHECK-LABEL: sil [ossa] @reborrowNone :
+// CHECK:       bb1([[ARG:%.*]] : @guaranteed $FakeOptional<C>):
+// CHECK-NEXT:    {{%.*}} = borrowed [[ARG]] : $FakeOptional<C> from ()
+// CHECK:       } // end sil function 'reborrowNone'
+sil [ossa] @reborrowNone : $@convention(thin) () -> () {
+bb0:
+  %0 = enum $FakeOptional<C>, #FakeOptional.none!enumelt
+  br bb1(%0 : $FakeOptional<C>)
+
+bb1(%2 : @guaranteed $FakeOptional<C>):
+  %3 = borrowed %2 : $FakeOptional<C> from ()
+  %4 = tuple ()
+  return %4 : $()
+}

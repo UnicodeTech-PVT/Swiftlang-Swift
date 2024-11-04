@@ -1,0 +1,70 @@
+class Person {
+  var firstName: String!
+  var lastName: String!
+  var age: Int!
+  var planet = "Earth", solarSystem = "Milky Way"
+  var avgHeight = 175
+  let line = #line, file = #file, handle = #dsohandle
+  lazy var idea: Idea = { fatalError() }()
+  var location: () -> Place = { fatalError() }
+  var secondLocation: (() -> Place)!
+  @MyWrapper var wrapped: String = ""
+  var computed: String { "hi" }
+  var getSet: String {
+    get { "hi" }
+    set {}
+  }
+  var didSet: String = "ds" {
+    didSet { print("didSet") }
+  }
+}
+
+struct Place {
+internal init(person: Person, street: String, apartment: Optional<String> = nil, city: String, state: String, postalCode: Int, plusFour: Int? = nil, callback: @escaping Place.Callback, wrapped: String, `protocol`: String) {
+self.person = person
+self.street = street
+self.apartment = apartment
+self.city = city
+self.state = state
+self.postalCode = postalCode
+self.plusFour = plusFour
+self.callback = callback
+self.wrapped = wrapped
+self.`protocol` = `protocol`
+}
+
+  typealias Callback = () -> ()
+  let person: Person
+  let street: String
+  let apartment: Optional<String>
+  let city: String
+  let state: String
+  let postalCode: Int
+  let plusFour: Int?
+  let callback: Callback
+  @MyWrapper var wrapped: String
+  var `protocol`: String
+}
+
+protocol Thing {
+  var idea: Idea { get }
+}
+
+enum Idea {
+  var subject: String { fatalError() }
+}
+
+struct OnlyComputed {
+  lazy var idea: Idea = { fatalError() }()
+  var computed: String { "hi" }
+}
+
+@propertyWrapper
+struct MyWrapper {
+  let wrappedValue: String
+}
+
+
+
+
+

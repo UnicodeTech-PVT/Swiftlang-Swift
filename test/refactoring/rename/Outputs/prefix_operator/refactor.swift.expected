@@ -1,0 +1,6 @@
+let <base>foo</base>: Int = 12
+let negfoo = -<base>foo</base>
+print("opposite of \(<base>foo</base>) is \(negfoo)")
+
+
+
